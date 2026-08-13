@@ -7,9 +7,13 @@ import com.cabletv.player.model.ChannelGroup;
 
 import java.io.BufferedReader;
 import java.io.StringReader;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -23,6 +27,16 @@ public class M3uParser {
     private static final Pattern TVG_ID_PATTERN = Pattern.compile("tvg-id=\"(.*?)\"");
     private static final Pattern HTTP_USER_AGENT_PATTERN = Pattern.compile("http-user-agent=\"(.*?)\"");
     private static final Pattern HTTP_REFERRER_PATTERN = Pattern.compile("http-referr?er=\"(.*?)\"");
+    /**
+     * EPG URL carried on the #EXTM3U header line. Not an official M3U attribute, but the de-facto
+     * convention shared by Kodi ({@code url-tvg}), TiviMate / IPTVnator / iPlayTV / GSE
+     * ({@code x-tvg-url}) and others ({@code tvg-url}). The value is a quoted string, so matching
+     * it here is safe: no code ever runs on it, and only http(s) URLs pass the filter below.
+     */
+    private static final Pattern EPG_URL_ATTR_PATTERN = Pattern.compile(
+            "(?i)(?:x-tvg-url|tvg-url|url-tvg)\\s*=\\s*[\"']([^\"']+)[\"']");
+    /** Cap on how many embedded EPG fallbacks a playlist may ask us to try. */
+    private static final int MAX_EPG_URLS = 5;
 
     public static final String HEADER_USER_AGENT = "User-Agent";
     public static final String HEADER_REFERER = "Referer";
@@ -41,6 +55,62 @@ public class M3uParser {
         }
 
         return new ArrayList<>(groupMap.values());
+    }
+
+    /**
+     * Extracts the EPG feed URL(s) a playlist embeds on its {@code #EXTM3U} header line, e.g.
+     * {@code #EXTM3U x-tvg-url="http://host/epg.xml.gz"}. Multiple values are tried in order, so
+     * space- or pipe-separated lists keep their fallback meaning. Only http(s) URLs are accepted;
+     * a value without a scheme is resolved against the playlist URL when that one is http(s), so
+     * a relative path cannot point anywhere outside the playlist's own origin.
+     */
+    public static List<String> parseEpgUrls(String content, String playlistUrl) {
+        if (content == null) {
+            return Collections.emptyList();
+        }
+        String header = normalizeNewlines(content).split("\n", 2)[0];
+        if (!header.startsWith("#EXTM3U")) {
+            return Collections.emptyList();
+        }
+
+        List<String> urls = new ArrayList<>();
+        Matcher matcher = EPG_URL_ATTR_PATTERN.matcher(header);
+        while (matcher.find() && urls.size() < MAX_EPG_URLS) {
+            for (String raw : matcher.group(1).split("[\\s|]+")) {
+                String url = resolveEpgUrl(raw.trim(), playlistUrl);
+                if (url != null && !urls.contains(url)) {
+                    urls.add(url);
+                    if (urls.size() >= MAX_EPG_URLS) {
+                        break;
+                    }
+                }
+            }
+        }
+        return urls;
+    }
+
+    /** @return an http(s) EPG URL, or null when the value is unusable. */
+    private static String resolveEpgUrl(String value, String playlistUrl) {
+        if (value.isEmpty()) {
+            return null;
+        }
+        String lower = value.toLowerCase(Locale.US);
+        if (lower.startsWith("http://") || lower.startsWith("https://")) {
+            return value;
+        }
+        // A relative path is only meaningful against an http(s) playlist; against a local file it
+        // could name anything on the device, so it is dropped there.
+        if (playlistUrl == null || playlistUrl.isEmpty()
+                || !(playlistUrl.startsWith("http://") || playlistUrl.startsWith("https://"))) {
+            return null;
+        }
+        try {
+            URL resolved = new URL(new URL(playlistUrl), value);
+            String scheme = resolved.getProtocol() == null ? "" : resolved.getProtocol().toLowerCase(Locale.US);
+            return ("http".equals(scheme) || "https".equals(scheme)) ? resolved.toString() : null;
+        } catch (MalformedURLException e) {
+            return null;
+        }
     }
 
     private static void parseM3u(String content, Map<String, ChannelGroup> groupMap) {

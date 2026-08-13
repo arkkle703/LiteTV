@@ -51,4 +51,12 @@
     <string name="sidebar_opacity_semi">Semi-opaque</string>
     <string name="sidebar_opacity_opaque">Opaque</string>
     <string name="sidebar_opacity_saved">Channel list background updated</string>
+
+    <string name="epg_preference">EPG Source Priority</string>
+    <string name="epg_preference_auto">Auto: my EPG first, fall back to the one in the M3U</string>
+    <string name="epg_preference_m3u">Prefer the EPG embedded in the M3U</string>
+    <string name="epg_preference_user">Only use the EPG I configured</string>
+    <string name="epg_preference_saved">EPG source priority saved</string>
+    <string name="epg_m3u_embedded_found">EPG embedded in M3U: %1$s</string>
+    <string name="epg_m3u_embedded_none">No EPG embedded in the current M3U</string>
 </resources>

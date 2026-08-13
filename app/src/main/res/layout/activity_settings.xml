@@ -160,6 +160,53 @@
                     android:textColor="@color/text_primary"
                     android:layout_marginTop="8dp" />
 
+                <TextView
+                    android:id="@+id/epg_preference_label"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/epg_preference"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:layout_marginTop="12dp" />
+
+                <RadioGroup
+                    android:id="@+id/epg_preference_group"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <RadioButton
+                        android:id="@+id/epg_preference_auto"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/epg_preference_auto"
+                        android:textColor="@color/text_primary" />
+
+                    <RadioButton
+                        android:id="@+id/epg_preference_m3u"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/epg_preference_m3u"
+                        android:textColor="@color/text_primary" />
+
+                    <RadioButton
+                        android:id="@+id/epg_preference_user"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/epg_preference_user"
+                        android:textColor="@color/text_primary" />
+
+                </RadioGroup>
+
+                <TextView
+                    android:id="@+id/epg_m3u_embedded"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp"
+                    android:layout_marginTop="8dp" />
+
             </LinearLayout>
 
             <!-- Channel List Appearance Section -->

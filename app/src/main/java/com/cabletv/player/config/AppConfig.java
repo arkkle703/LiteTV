@@ -5,6 +5,7 @@ import android.content.Context;
 import com.orhanobut.hawk.Hawk;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class AppConfig {
@@ -18,8 +19,19 @@ public class AppConfig {
     private static final String EPG_CACHE_VALIDITY_HOURS_KEY = "app_epg_cache_hours";
     private static final String LAST_CHANNEL_URL_KEY = "app_last_channel_url";
     private static final String FAVORITE_CHANNELS_KEY = "app_favorite_channels";
+    private static final String EPG_PREFERENCE_KEY = "app_epg_preference";
+    private static final String M3U_EPG_URLS_KEY = "app_m3u_epg_urls";
 
     private static final String DEFAULT_EPG_URL = "";
+    /**
+     * Which EPG source wins when both a user-configured URL and one embedded in the M3U exist.
+     * auto: user URL first, fall back to the M3U's; m3u: M3U's first, fall back to the user's;
+     * user: only ever the user's. The playlist-embedded feed is always a candidate, never a
+     * requirement: a playlist without one simply leaves those slots empty.
+     */
+    public static final String EPG_PREFERENCE_AUTO = "auto";
+    public static final String EPG_PREFERENCE_M3U = "m3u";
+    public static final String EPG_PREFERENCE_USER = "user";
     private static final int DEFAULT_WEB_SERVER_PORT = 8899;
     private static final int DEFAULT_EPG_CACHE_HOURS = 24; // EPG 缓存 24 小时后刷新
 
@@ -39,6 +51,58 @@ public class AppConfig {
 
     public static void setEpgUrl(String url) {
         Hawk.put(EPG_URL_KEY, url);
+    }
+
+    /** EPG source priority; see the constants for the three meanings. */
+    public static String getEpgPreference() {
+        String preference = Hawk.get(EPG_PREFERENCE_KEY, EPG_PREFERENCE_AUTO);
+        if (!EPG_PREFERENCE_AUTO.equals(preference)
+                && !EPG_PREFERENCE_M3U.equals(preference)
+                && !EPG_PREFERENCE_USER.equals(preference)) {
+            return EPG_PREFERENCE_AUTO;
+        }
+        return preference;
+    }
+
+    public static void setEpgPreference(String preference) {
+        Hawk.put(EPG_PREFERENCE_KEY, preference);
+    }
+
+    /** EPG feed URLs the playlist itself declared, in playlist order (first is primary). */
+    public static List<String> getM3uEpgUrls() {
+        List<String> urls = Hawk.get(M3U_EPG_URLS_KEY, null);
+        return urls != null ? urls : new ArrayList<String>();
+    }
+
+    public static void setM3uEpgUrls(List<String> urls) {
+        Hawk.put(M3U_EPG_URLS_KEY, urls == null ? new ArrayList<String>() : new ArrayList<>(urls));
+    }
+
+    /**
+     * The EPG sources to try, in order, given the configured preference. Empty when nothing is
+     * available at all. Callers treat the first entry as primary (e.g. for DIYP mode).
+     */
+    public static List<String> resolveEpgUrls() {
+        String userUrl = getEpgUrl();
+        List<String> m3uUrls = getM3uEpgUrls();
+        String preference = getEpgPreference();
+
+        if (EPG_PREFERENCE_M3U.equals(preference)) {
+            if (!m3uUrls.isEmpty()) {
+                return m3uUrls;
+            }
+            return userUrl.isEmpty() ? Collections.<String>emptyList()
+                    : Collections.singletonList(userUrl);
+        }
+        if (EPG_PREFERENCE_USER.equals(preference)) {
+            return userUrl.isEmpty() ? Collections.<String>emptyList()
+                    : Collections.singletonList(userUrl);
+        }
+        // auto: the user's own source wins when they bothered to set one.
+        if (!userUrl.isEmpty()) {
+            return Collections.singletonList(userUrl);
+        }
+        return m3uUrls;
     }
 
     // Web Server

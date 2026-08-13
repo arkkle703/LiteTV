@@ -14,6 +14,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URLDecoder;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.SynchronousQueue;
@@ -47,6 +48,7 @@ public class ConfigWebServer {
     public interface OnConfigChangeListener {
         void onM3uUrlChanged(String newUrl);
         void onEpgUrlChanged(String newUrl);
+        void onEpgPreferenceChanged(String preference);
     }
 
     /** Cleared by the Activity in onDestroy(); volatile because server threads read it. */
@@ -225,6 +227,9 @@ public class ConfigWebServer {
             } else if ("POST".equals(method) && "/config/epg-url".equals(path)) {
                 response = handleEpgUrlPost(body);
                 contentType = "application/json";
+            } else if ("POST".equals(method) && "/config/epg-preference".equals(path)) {
+                response = handleEpgPreferencePost(body);
+                contentType = "application/json";
             } else {
                 sendResponse(socket, "404 Not Found", 404, "text/plain");
                 return;
@@ -369,10 +374,40 @@ public class ConfigWebServer {
         return json.toString();
     }
 
+    private static String handleEpgPreferencePost(String body) {
+        try {
+            Map<String, String> params = parseFormData(body);
+            String preference = params.get("epg_preference");
+            if (preference != null && (AppConfig.EPG_PREFERENCE_AUTO.equals(preference)
+                    || AppConfig.EPG_PREFERENCE_M3U.equals(preference)
+                    || AppConfig.EPG_PREFERENCE_USER.equals(preference))) {
+                AppConfig.setEpgPreference(preference);
+                OnConfigChangeListener listener = sConfigChangeListener;
+                if (listener != null) {
+                    listener.onEpgPreferenceChanged(preference);
+                }
+                JsonObject json = new JsonObject();
+                json.addProperty("success", true);
+                json.addProperty("message", "EPG priority saved");
+                return json.toString();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving EPG preference", e);
+        }
+        JsonObject json = new JsonObject();
+        json.addProperty("success", false);
+        json.addProperty("message", "Failed to save EPG priority");
+        return json.toString();
+    }
+
     private static String getConfigJson() {
         JsonObject config = new JsonObject();
         config.addProperty("m3u_url", AppConfig.getM3uUrl());
         config.addProperty("epg_url", AppConfig.getEpgUrl());
+        config.addProperty("epg_preference", AppConfig.getEpgPreference());
+        config.add("m3u_epg_urls", new com.google.gson.Gson().toJsonTree(AppConfig.getM3uEpgUrls()));
+        List<String> active = AppConfig.resolveEpgUrls();
+        config.addProperty("active_epg_url", active.isEmpty() ? "" : active.get(0));
         config.addProperty("web_server_enabled", AppConfig.isWebServerEnabled());
         return config.toString();
     }
@@ -436,6 +471,16 @@ public class ConfigWebServer {
                 "            <div class=\"info\">支持 {name} 和 {date} 占位符，例如: http://epg.example.com/api/diyp?ch={name}&date={date}</div>\n" +
                 "            <button onclick=\"saveEpgUrl()\">保存 EPG 地址</button>\n" +
                 "            <div id=\"epgStatus\" class=\"status\"></div>\n" +
+                "            <label for=\"epgPreference\" style=\"margin-top:16px;\">EPG 来源优先级:</label>\n" +
+                "            <select id=\"epgPreference\" style=\"width:100%;padding:10px;margin-bottom:12px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;\">\n" +
+                "                <option value=\"auto\">自动：优先使用我设置的 EPG，未设置时用 M3U 内置</option>\n" +
+                "                <option value=\"m3u\">优先使用 M3U 内置 EPG</option>\n" +
+                "                <option value=\"user\">仅使用我设置的 EPG</option>\n" +
+                "            </select>\n" +
+                "            <button onclick=\"saveEpgPreference()\">保存优先级</button>\n" +
+                "            <div id=\"epgPrefStatus\" class=\"status\"></div>\n" +
+                "            <div id=\"epgM3uInfo\" class=\"info\"></div>\n" +
+                "            <div id=\"epgActiveInfo\" class=\"info\"></div>\n" +
                 "        </div>\n" +
                 "    </div>\n" +
                 "    <script>\n" +
@@ -481,10 +526,39 @@ public class ConfigWebServer {
                 "                document.getElementById('epgStatus').textContent = '✗ 网络错误: ' + e;\n" +
                 "            });\n" +
                 "        }\n" +
+                "        function saveEpgPreference() {\n" +
+                "            const pref = document.getElementById('epgPreference').value;\n" +
+                "            fetch('/config/epg-preference', {\n" +
+                "                method: 'POST',\n" +
+                "                headers: {'Content-Type': 'application/x-www-form-urlencoded'},\n" +
+                "                body: 'epg_preference=' + encodeURIComponent(pref)\n" +
+                "            }).then(r => r.json()).then(d => {\n" +
+                "                const status = document.getElementById('epgPrefStatus');\n" +
+                "                if (d.success) {\n" +
+                "                    status.className = 'status success';\n" +
+                "                    status.textContent = '✓ ' + d.message + ' (TV 端将自动重新加载)';\n" +
+                "                } else {\n" +
+                "                    status.className = 'status error';\n" +
+                "                    status.textContent = '✗ ' + d.message;\n" +
+                "                }\n" +
+                "            }).catch(e => {\n" +
+                "                document.getElementById('epgPrefStatus').className = 'status error';\n" +
+                "                document.getElementById('epgPrefStatus').textContent = '✗ 网络错误: ' + e;\n" +
+                "            });\n" +
+                "        }\n" +
                 "        window.onload = function() {\n" +
                 "            fetch('/config/get').then(r => r.json()).then(d => {\n" +
                 "                document.getElementById('m3uUrl').value = d.m3u_url || '';\n" +
                 "                document.getElementById('epgUrl').value = d.epg_url || '';\n" +
+                "                document.getElementById('epgPreference').value = d.epg_preference || 'auto';\n" +
+                "                const m3uUrls = d.m3u_epg_urls || [];\n" +
+                "                document.getElementById('epgM3uInfo').textContent = m3uUrls.length\n" +
+                "                    ? 'M3U 内置 EPG: ' + m3uUrls.join(' | ')\n" +
+                "                    : '当前 M3U 未提供内置 EPG';\n" +
+                "                const active = d.active_epg_url || '';\n" +
+                "                document.getElementById('epgActiveInfo').textContent = active\n" +
+                "                    ? '当前生效 EPG: ' + active\n" +
+                "                    : '当前无生效 EPG 来源';\n" +
                 "            }).catch(e => console.error('加载配置失败:', e));\n" +
                 "        };\n" +
                 "    </script>\n" +

@@ -128,11 +128,16 @@ public class ChannelRepository {
         } else {
             // MainActivity already tells the user how to configure a source.
             Log.w(TAG, "No M3U source configured");
+            AppConfig.setM3uEpgUrls(Collections.emptyList());
             return;
         }
 
         List<ChannelGroup> parsed = parseQuietly(content);
         if (parsed != null) {
+            // Whatever we are about to show, its header is the truth for "EPG embedded in the
+            // playlist": keep it in sync so the EPG manager can fall back to it. The base URL
+            // is only meaningful for a URL-loaded playlist, which is what relative paths imply.
+            AppConfig.setM3uEpgUrls(M3uParser.parseEpgUrls(content, m3uUrl));
             if (fromNetwork) {
                 saveToCache(content);
             }
@@ -144,9 +149,11 @@ public class ChannelRepository {
         }
 
         // Network or parsing failed: fall back to the last playlist that did work.
-        List<ChannelGroup> cached = parseQuietly(readFileQuietly(mCacheFile));
+        String cachedContent = readFileQuietly(mCacheFile);
+        List<ChannelGroup> cached = parseQuietly(cachedContent);
         if (cached != null) {
             Log.w(TAG, "Serving cached playlist after failure: " + failure);
+            AppConfig.setM3uEpgUrls(M3uParser.parseEpgUrls(cachedContent, m3uUrl));
             publish(cached);
             notifyLoadFailed(failure, true);
         } else {

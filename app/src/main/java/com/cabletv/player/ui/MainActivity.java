@@ -33,6 +33,12 @@ public class MainActivity extends Activity {
     private PlaybackStatusView mPlaybackStatusView;
     private ChannelNumberView mChannelNumberView;
     private ChannelRepository.OnChannelsChangedListener mChannelsChangedListener;
+    /**
+     * Snapshot of the EPG settings the in-memory programmes were loaded with. Comparing on
+     * resume catches edits made in the settings screen (URL or priority), which cannot reach
+     * the EpgManager directly.
+     */
+    private String mLastEpgConfigSignature = "";
     private int mCurrentChannelIndex = 0;
     private long mLastChannelSwitchTime = 0;
     private boolean mChannelListVisible = false;
@@ -70,6 +76,7 @@ public class MainActivity extends Activity {
         mChannelRepository = new ChannelRepository(this);
         mNavigator = new ChannelNavigator();
         mEpgManager = new EpgManager(this);
+        mLastEpgConfigSignature = epgConfigSignature();
 
         // Create overlay components
         FrameLayout rootView = (FrameLayout) mVideoView.getParent();
@@ -187,9 +194,21 @@ public class MainActivity extends Activity {
             @Override
             public void onEpgUrlChanged(String newUrl) {
                 Log.d(TAG, "EPG URL changed, reloading EPG: " + newUrl);
+                mLastEpgConfigSignature = epgConfigSignature();
                 mEpgManager.onEpgSourceChanged();
                 // Per-channel sources load lazily, so ask for the channel on screen right
                 // away instead of leaving its info bar empty until the user navigates.
+                Channel current = mChannelRepository.getChannel(mCurrentChannelIndex);
+                if (current != null) {
+                    mEpgManager.loadEpg(current);
+                }
+            }
+
+            @Override
+            public void onEpgPreferenceChanged(String preference) {
+                Log.d(TAG, "EPG priority changed, reloading EPG: " + preference);
+                mLastEpgConfigSignature = epgConfigSignature();
+                mEpgManager.onEpgSourceChanged();
                 Channel current = mChannelRepository.getChannel(mCurrentChannelIndex);
                 if (current != null) {
                     mEpgManager.loadEpg(current);
@@ -375,6 +394,11 @@ public class MainActivity extends Activity {
         } catch (NumberFormatException e) {
             return -1;
         }
+    }
+
+    /** Identity of the EPG settings the user controls directly (URL + priority). */
+    private static String epgConfigSignature() {
+        return AppConfig.getEpgUrl() + "\n" + AppConfig.getEpgPreference();
     }
 
     private void handleChannelUp() {
@@ -722,6 +746,14 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        String signature = epgConfigSignature();
+        if (!signature.equals(mLastEpgConfigSignature)) {
+            mLastEpgConfigSignature = signature;
+            if (mEpgManager != null) {
+                Log.d(TAG, "EPG settings changed in settings screen, reloading");
+                mEpgManager.onEpgSourceChanged();
+            }
+        }
         if (mVideoView != null) {
             mVideoView.resume();
         }

@@ -49,15 +49,18 @@
 - **本地缓存**：磁盘缓存 + 按日期校验 + 版本控制，启动预加载秒开
 - **节目展示**：当前节目 / 下一个节目、实时进度条、频道列表内嵌节目表
 - **安全加固**：禁用外部实体解析（XXE 防护）
+- **M3U 内置 EPG**：自动识别播放列表头部的 `x-tvg-url` / `tvg-url` / `url-tvg` 属性
+  （TiviMate / IPTVnator / Kodi 等通用约定，支持空格或 `|` 分隔的多个后备地址，仅接受 http/https）
+- **来源优先级**：未配置 EPG 时自动使用 M3U 内置 EPG；已配置时可选择「自动 / 优先 M3U 内置 / 仅用户配置」
 
 ### 🌐 内置 Web 配置服务器（局域网远程配置）
 - Socket HTTP 服务器，零外部依赖，默认端口 **8899**
 - 浏览器打开 `http://电视IP:8899` 即可可视化配置
-- REST 接口：`GET /config/get`、`POST /config/m3u-url`、`POST /config/epg-url`
+- REST 接口：`GET /config/get`、`POST /config/m3u-url`、`POST /config/epg-url`、`POST /config/epg-preference`
 - 安全加固：跨站请求防护（Origin 校验）、请求体上限、超时、有界线程池
 
 ### ⚙️ 设置项
-- M3U 直播源地址、EPG 地址
+- M3U 直播源地址、EPG 地址、EPG 来源优先级（自动 / 优先 M3U 内置 / 仅用户配置）
 - Web 服务器开关与端口
 - 频道上下键交换（节目列表）、EPG 显示开关
 - 菜单栏透明度（淡 / 中 / 实心）

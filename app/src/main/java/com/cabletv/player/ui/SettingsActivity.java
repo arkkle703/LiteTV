@@ -15,6 +15,8 @@ import com.cabletv.player.R;
 import com.cabletv.player.config.AppConfig;
 import com.cabletv.player.server.ConfigWebServer;
 
+import java.util.List;
+
 public class SettingsActivity extends Activity {
     private EditText mM3uUrlInput;
     private EditText mEpgUrlInput;
@@ -22,6 +24,8 @@ public class SettingsActivity extends Activity {
     private TextView mWebServerAddress;
     private CheckBox mEpgDisplayToggle;
     private RadioGroup mSidebarOpacityGroup;
+    private RadioGroup mEpgPreferenceGroup;
+    private TextView mEpgM3uEmbeddedText;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -33,6 +37,8 @@ public class SettingsActivity extends Activity {
         mWebServerToggle = findViewById(R.id.web_server_toggle);
         mWebServerAddress = findViewById(R.id.web_server_address);
         mSidebarOpacityGroup = findViewById(R.id.sidebar_opacity_group);
+        mEpgPreferenceGroup = findViewById(R.id.epg_preference_group);
+        mEpgM3uEmbeddedText = findViewById(R.id.epg_m3u_embedded);
 
         Button saveM3uBtn = findViewById(R.id.save_m3u_btn);
         Button saveEpgBtn = findViewById(R.id.save_epg_btn);
@@ -69,6 +75,33 @@ public class SettingsActivity extends Activity {
                 Toast.makeText(this, R.string.sidebar_opacity_saved, Toast.LENGTH_SHORT).show();
             });
         }
+
+        if (mEpgPreferenceGroup != null) {
+            mEpgPreferenceGroup.setOnCheckedChangeListener((group, checkedId) -> {
+                AppConfig.setEpgPreference(epgPreferenceOf(checkedId));
+                Toast.makeText(this, R.string.epg_preference_saved, Toast.LENGTH_SHORT).show();
+            });
+        }
+    }
+
+    private static String epgPreferenceOf(int checkedId) {
+        if (checkedId == R.id.epg_preference_m3u) {
+            return AppConfig.EPG_PREFERENCE_M3U;
+        }
+        if (checkedId == R.id.epg_preference_user) {
+            return AppConfig.EPG_PREFERENCE_USER;
+        }
+        return AppConfig.EPG_PREFERENCE_AUTO;
+    }
+
+    private static int epgPreferenceRadioId(String preference) {
+        if (AppConfig.EPG_PREFERENCE_M3U.equals(preference)) {
+            return R.id.epg_preference_m3u;
+        }
+        if (AppConfig.EPG_PREFERENCE_USER.equals(preference)) {
+            return R.id.epg_preference_user;
+        }
+        return R.id.epg_preference_auto;
     }
 
     private static int opacityOf(int checkedId) {
@@ -104,7 +137,25 @@ public class SettingsActivity extends Activity {
             // mistaken for the viewer choosing it again.
             mSidebarOpacityGroup.check(radioIdOf(AppConfig.getSidebarOpacity()));
         }
+        if (mEpgPreferenceGroup != null) {
+            mEpgPreferenceGroup.check(epgPreferenceRadioId(AppConfig.getEpgPreference()));
+        }
+        updateM3uEpgInfo();
         updateWebServerAddress();
+    }
+
+    /** Shows which EPG feed the current playlist embedded, if any. */
+    private void updateM3uEpgInfo() {
+        if (mEpgM3uEmbeddedText == null) {
+            return;
+        }
+        List<String> urls = AppConfig.getM3uEpgUrls();
+        if (urls.isEmpty()) {
+            mEpgM3uEmbeddedText.setText(R.string.epg_m3u_embedded_none);
+        } else {
+            mEpgM3uEmbeddedText.setText(getString(R.string.epg_m3u_embedded_found,
+                    android.text.TextUtils.join(", ", urls)));
+        }
     }
 
     private void createToggleIfNotExists() {

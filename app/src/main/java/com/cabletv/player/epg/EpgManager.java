@@ -92,6 +92,12 @@ public class EpgManager {
     private volatile boolean mBulkLoadDone = false;
     private volatile boolean mBulkLoadQueued = false;
     private volatile long mBulkRetryAfter = 0;
+    /**
+     * Which effective EPG sources the programmes in memory came from. When the playlist reloads
+     * and its embedded feed changes (or the preference flips), the old match must be dropped even
+     * if the channel names are identical.
+     */
+    private volatile String mLoadedEpgSourceKey = "";
     /** Touched only from the EPG thread. */
     private long mLastCacheSaveAt = 0;
 
@@ -142,31 +148,34 @@ public class EpgManager {
         }
         List<Channel> previous = mKnownChannels;
         mKnownChannels = Collections.unmodifiableList(new ArrayList<>(channels));
-        if (!previous.isEmpty() && !sameChannels(previous, mKnownChannels)) {
+
+        List<String> epgUrls = AppConfig.resolveEpgUrls();
+        String sourceKey = epgSourceKey(epgUrls);
+        boolean sourceChanged = !mLoadedEpgSourceKey.isEmpty() && !mLoadedEpgSourceKey.equals(sourceKey);
+        mLoadedEpgSourceKey = sourceKey;
+
+        if (sourceChanged || (!previous.isEmpty() && !sameChannels(previous, mKnownChannels))) {
             // Programmes are keyed by playlist channel, so a different playlist needs a fresh
             // match: keeping the old cache would leave the new channels blank until it expired.
-            Log.d(TAG, "Playlist changed, discarding matched EPG data");
-            mProgramsByChannel.clear();
-            mBulkLoadDone = false;
-            mBulkRetryAfter = 0;
-            submit(mCache::clearCache);
+            // The same goes for a new embedded EPG feed behind identical channel names.
+            Log.d(TAG, "Playlist or EPG source changed, discarding matched EPG data");
+            resetEpgData();
         }
 
-        String epgUrl = AppConfig.getEpgUrl();
-        if (epgUrl == null || epgUrl.isEmpty()) {
-            Log.d(TAG, "No EPG URL configured");
+        if (epgUrls.isEmpty()) {
+            Log.d(TAG, "No EPG source configured");
             return;
         }
 
-        if (detectEpgSourceType(epgUrl) == EpgSourceType.DIYP) {
+        if (detectEpgSourceType(epgUrls.get(0)) == EpgSourceType.DIYP) {
             // One request per channel: fetching 150 of them up front would be far worse than
             // loading each channel when the user actually reaches it.
             Log.d(TAG, "DIYP source: loading cache now, channels on demand");
             submit(this::loadCacheIntoMemory);
             return;
         }
-        Log.d(TAG, "Requesting EPG for " + channels.size() + " channels from " + epgUrl);
-        ensureBulkLoad(epgUrl);
+        Log.d(TAG, "Requesting EPG for " + channels.size() + " channels from " + epgUrls);
+        ensureBulkLoad(epgUrls);
     }
 
     /**
@@ -185,31 +194,29 @@ public class EpgManager {
         if (existing != null && !existing.isEmpty()) {
             return;
         }
-        String epgUrl = AppConfig.getEpgUrl();
-        if (epgUrl == null || epgUrl.isEmpty()) {
+        List<String> epgUrls = AppConfig.resolveEpgUrls();
+        if (epgUrls.isEmpty()) {
             return;
         }
-        if (detectEpgSourceType(epgUrl) == EpgSourceType.DIYP) {
-            loadDiypChannel(channel, epgUrl, key);
+        if (detectEpgSourceType(epgUrls.get(0)) == EpgSourceType.DIYP) {
+            loadDiypChannel(channel, epgUrls.get(0), key);
         } else {
-            ensureBulkLoad(epgUrl);
+            ensureBulkLoad(epgUrls);
         }
     }
 
-    /** The EPG URL changed: throw away what we have and reload from the new source. */
+    /** The EPG source (URL or preference) changed: throw away what we have and reload. */
     public void onEpgSourceChanged() {
         Log.d(TAG, "EPG source changed, dropping cached programmes");
-        mProgramsByChannel.clear();
-        mBulkLoadDone = false;
-        mBulkRetryAfter = 0;
-        submit(mCache::clearCache);
-        notifyEpgUpdated();
+        mLoadedEpgSourceKey = "";
+        resetEpgData();
 
-        String epgUrl = AppConfig.getEpgUrl();
-        if (epgUrl != null && !epgUrl.isEmpty()
-                && detectEpgSourceType(epgUrl) != EpgSourceType.DIYP
+        List<String> epgUrls = AppConfig.resolveEpgUrls();
+        mLoadedEpgSourceKey = epgSourceKey(epgUrls);
+        if (!epgUrls.isEmpty()
+                && detectEpgSourceType(epgUrls.get(0)) != EpgSourceType.DIYP
                 && !mKnownChannels.isEmpty()) {
-            ensureBulkLoad(epgUrl);
+            ensureBulkLoad(epgUrls);
         }
     }
 
@@ -271,9 +278,37 @@ public class EpgManager {
         return programs != null ? programs : Collections.<Program>emptyList();
     }
 
+    /**
+     * Throws away every matched programme and its on-disk cache; also flips the bulk-load flags
+     * so the next request really does re-fetch. Runs the cache wipe on the EPG thread because the
+     * cache is only ever touched there.
+     */
+    private void resetEpgData() {
+        mProgramsByChannel.clear();
+        mBulkLoadDone = false;
+        mBulkRetryAfter = 0;
+        submit(mCache::clearCache);
+        notifyEpgUpdated();
+    }
+
+    /** Stable identity of an ordered EPG source list; empty when there is no source. */
+    private static String epgSourceKey(List<String> epgUrls) {
+        if (epgUrls == null || epgUrls.isEmpty()) {
+            return "";
+        }
+        StringBuilder key = new StringBuilder();
+        for (String url : epgUrls) {
+            if (key.length() > 0) {
+                key.append('\n');
+            }
+            key.append(url);
+        }
+        return key.toString();
+    }
+
     // ------------------------------------------------------------ bulk loading
 
-    private void ensureBulkLoad(final String epgUrl) {
+    private void ensureBulkLoad(final List<String> epgUrls) {
         if (mBulkLoadDone || mBulkLoadQueued) {
             return;
         }
@@ -285,7 +320,7 @@ public class EpgManager {
         submit(() -> {
             boolean loaded = false;
             try {
-                loaded = runBulkLoad(epgUrl);
+                loaded = runBulkLoad(epgUrls);
             } catch (Exception e) {
                 Log.e(TAG, "EPG load failed: " + e.getMessage(), e);
             } finally {
@@ -298,7 +333,7 @@ public class EpgManager {
     }
 
     /** Runs on the EPG thread. Returns true when programmes are in memory. */
-    private boolean runBulkLoad(String epgUrl) throws IOException, XmlPullParserException {
+    private boolean runBulkLoad(List<String> epgUrls) {
         List<Channel> channels = mKnownChannels;
         if (channels.isEmpty()) {
             Log.d(TAG, "No known channels yet, skipping EPG load");
@@ -310,18 +345,30 @@ public class EpgManager {
             return true;
         }
 
-        EpgSourceType type = detectEpgSourceType(epgUrl);
-        Log.d(TAG, "Downloading EPG (" + type + ") from " + epgUrl);
-        Map<String, List<Program>> parsed = downloadAndParseXmltv(epgUrl, type, channels);
-        if (parsed.isEmpty()) {
-            Log.w(TAG, "EPG contained no programmes for any of our " + channels.size() + " channels");
-            return false;
+        // A playlist may declare several feeds (space/pipe separated). Try them in order until
+        // one yields programmes; a broken or unreachable source must not sink the rest.
+        for (String epgUrl : epgUrls) {
+            EpgSourceType type = detectEpgSourceType(epgUrl);
+            Log.d(TAG, "Downloading EPG (" + type + ") from " + epgUrl);
+            Map<String, List<Program>> parsed;
+            try {
+                parsed = downloadAndParseXmltv(epgUrl, type, channels);
+            } catch (Exception e) {
+                Log.w(TAG, "EPG source " + epgUrl + " failed, trying next: " + e.getMessage());
+                continue;
+            }
+            if (parsed.isEmpty()) {
+                Log.w(TAG, "EPG source " + epgUrl + " contained no programmes for any of our "
+                        + channels.size() + " channels");
+                continue;
+            }
+            mProgramsByChannel.putAll(parsed);
+            Log.i(TAG, "✓ EPG loaded for " + parsed.size() + "/" + channels.size()
+                    + " channels from " + epgUrl);
+            mCache.savePrograms(mProgramsByChannel);
+            return true;
         }
-
-        mProgramsByChannel.putAll(parsed);
-        Log.i(TAG, "✓ EPG loaded for " + parsed.size() + "/" + channels.size() + " channels");
-        mCache.savePrograms(mProgramsByChannel);
-        return true;
+        return false;
     }
 
     /** Reads the cache into memory. Returns true if anything was found. Runs on the EPG thread. */
