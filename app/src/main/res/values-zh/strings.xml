@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LiteTV</string>
+    <string name="channel_list">频道列表</string>
+    <string name="settings">设置</string>
+    <string name="web_server">Web 服务器</string>
+    <string name="play_source">播放源</string>
+    <string name="epg_source">EPG 节目单源</string>
+    <string name="key_mapping">按键映射</string>
+    <string name="m3u_url">M3U 地址</string>
+    <string name="epg_url">EPG 地址</string>
+    <string name="web_server_enabled">启用 Web 服务器</string>
+    <string name="server_address">服务器地址</string>
+    <string name="upload_m3u">上传 M3U 文件</string>
+    <string name="channel_up">频道上</string>
+    <string name="channel_down">频道下</string>
+    <string name="volume_up">音量加</string>
+    <string name="volume_down">音量减</string>
+    <string name="ok">确定</string>
+    <string name="menu">菜单</string>
+    <string name="back">返回</string>
+    <string name="rebind">重新绑定</string>
+    <string name="waiting_key">请按键…</string>
+    <string name="no_playlist_configured">尚未配置播放列表。按 MENU 键打开设置，或通过浏览器访问本机端口 %1$d 进行配置。</string>
+    <string name="playback_buffering">缓冲中…</string>
+    <string name="playback_reconnecting">播放失败，正在重连…（%1$d/%2$d）</string>
+    <string name="playback_failed">无法播放 %1$s，按 OK 键选择其他频道。</string>
+    <string name="playlist_load_failed">无法加载播放列表：%1$s</string>
+    <string name="playlist_load_failed_cached">无法刷新播放列表（%1$s），正在显示上次保存的副本。</string>
+    <string name="playback_trying_backup">%1$s 无响应，正在尝试第 %2$d/%3$d 个源…</string>
+    <string name="todays_programs">今日节目</string>
+    <string name="no_epg_data">暂无节目单</string>
+    <string name="next_program">下一个：%1$s</string>
+    <string name="channel_number_unknown">无此频道</string>
+    <string name="groups">分组</string>
+    <string name="group_favorites">我的收藏</string>
+    <string name="group_all">全部频道</string>
+    <string name="favorites_empty">还没有收藏。\n\n在频道上长按 OK 键即可添加。</string>
+    <string name="group_empty">该分组为空。</string>
+    <string name="favorite_added">★ %1$s 已加入收藏</string>
+    <string name="favorite_removed">%1$s 已取消收藏</string>
+    <string name="m3u_url_saved">M3U 地址已保存</string>
+    <string name="epg_url_saved">EPG 地址已保存</string>
+    <string name="web_server_started">Web 服务器已启动</string>
+    <string name="web_server_stopped">Web 服务器已停止</string>
+    <string name="epg_display_enabled">已启用节目单显示</string>
+    <string name="epg_display_disabled">已禁用节目单显示</string>
+    <string name="server_address_format">地址：%1$s</string>
+    <string name="sidebar_opacity">频道列表背景</string>
+    <string name="sidebar_opacity_translucent">半透明（默认）</string>
+    <string name="sidebar_opacity_semi">半不透明</string>
+    <string name="sidebar_opacity_opaque">不透明</string>
+    <string name="sidebar_opacity_saved">频道列表背景已更新</string>
+
+    <string name="save">保存</string>
+    <string name="show_epg_in_channel_list">在频道列表显示节目单</string>
+
+    <string name="epg_preference">EPG 来源优先级</string>
+    <string name="epg_preference_auto">自动：优先使用我设置的 EPG，未设置时用 M3U 内置</string>
+    <string name="epg_preference_m3u">优先使用 M3U 内置 EPG</string>
+    <string name="epg_preference_user">仅使用我设置的 EPG</string>
+    <string name="epg_preference_saved">EPG 来源优先级已保存</string>
+    <string name="epg_m3u_embedded_found">M3U 内置 EPG：%1$s</string>
+    <string name="epg_m3u_embedded_none">当前 M3U 未提供内置 EPG</string>
+</resources>

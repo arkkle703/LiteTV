@@ -98,7 +98,7 @@
                     android:id="@+id/save_m3u_btn"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Save"
+                    android:text="@string/save"
                     android:background="@drawable/button_focus_selector"
                     android:textColor="@color/text_primary"
                     android:padding="12dp"
@@ -146,7 +146,7 @@
                     android:id="@+id/save_epg_btn"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Save"
+                    android:text="@string/save"
                     android:background="@drawable/button_focus_selector"
                     android:textColor="@color/text_primary"
                     android:padding="12dp"
@@ -156,7 +156,7 @@
                     android:id="@+id/epg_display_toggle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Show EPG in channel list"
+                    android:text="@string/show_epg_in_channel_list"
                     android:textColor="@color/text_primary"
                     android:layout_marginTop="8dp" />
 

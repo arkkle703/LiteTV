@@ -52,6 +52,9 @@
     <string name="sidebar_opacity_opaque">Opaque</string>
     <string name="sidebar_opacity_saved">Channel list background updated</string>
 
+    <string name="save">Save</string>
+    <string name="show_epg_in_channel_list">Show EPG in channel list</string>
+
     <string name="epg_preference">EPG Source Priority</string>
     <string name="epg_preference_auto">Auto: my EPG first, fall back to the one in the M3U</string>
     <string name="epg_preference_m3u">Prefer the EPG embedded in the M3U</string>
