@@ -408,6 +408,16 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         return position >= 0 && position < mChannels.size() ? mChannels.get(position) : null;
     }
 
+    /** @return the programme highlighted in the right-hand column, or null when none is shown. */
+    @Nullable
+    public EpgManager.Program getSelectedProgram() {
+        RecyclerView.Adapter<?> adapter = mProgramRecyclerView.getAdapter();
+        if (adapter instanceof ProgramListAdapter) {
+            return ((ProgramListAdapter) adapter).getProgram(mSelectedProgramIndex);
+        }
+        return null;
+    }
+
     public int getBrowsedGroupIndex() {
         return mBrowsedGroup;
     }
@@ -999,6 +1009,11 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         @Override
         public int getItemCount() {
             return mPrograms.size();
+        }
+
+        @Nullable
+        EpgManager.Program getProgram(int index) {
+            return index >= 0 && index < mPrograms.size() ? mPrograms.get(index) : null;
         }
 
         static class ProgramViewHolder extends RecyclerView.ViewHolder {

@@ -28,6 +28,14 @@ public class M3uParser {
     private static final Pattern HTTP_USER_AGENT_PATTERN = Pattern.compile("http-user-agent=\"(.*?)\"");
     private static final Pattern HTTP_REFERRER_PATTERN = Pattern.compile("http-referr?er=\"(.*?)\"");
     /**
+     * Catchup (回看/时移) attributes. Not an official M3U spec, but the de-facto convention
+     * shared by TiviMate / IPTV Smarters / FongMi / rtp2httpd. Values are quoted strings, so
+     * matching them is safe; the URL template is only ever fed to the hardened HTTP player.
+     */
+    private static final Pattern CATCHUP_PATTERN = Pattern.compile("catchup=\"(.*?)\"");
+    private static final Pattern CATCHUP_SOURCE_PATTERN = Pattern.compile("catchup-source=\"(.*?)\"");
+    private static final Pattern CATCHUP_REPLACE_PATTERN = Pattern.compile("catchup-replace=\"(.*?)\"");
+    /**
      * EPG URL carried on the #EXTM3U header line. Not an official M3U attribute, but the de-facto
      * convention shared by Kodi ({@code url-tvg}), TiviMate / IPTVnator / iPlayTV / GSE
      * ({@code x-tvg-url}) and others ({@code tvg-url}). The value is a quoted string, so matching
@@ -118,11 +126,22 @@ public class M3uParser {
         String line;
         String currentGroupName = DEFAULT_GROUP_NAME;
         Channel pendingChannel = null;
+        // The #EXTM3U header may carry catchup defaults that per-channel attributes override.
+        String defaultCatchupType = "";
+        String defaultCatchupSource = "";
+        String defaultCatchupReplace = "";
 
         try {
             while ((line = reader.readLine()) != null) {
                 line = line.trim();
                 if (line.isEmpty()) continue;
+
+                if (line.startsWith("#EXTM3U")) {
+                    defaultCatchupType = extractPattern(line, CATCHUP_PATTERN);
+                    defaultCatchupSource = extractPattern(line, CATCHUP_SOURCE_PATTERN);
+                    defaultCatchupReplace = extractPattern(line, CATCHUP_REPLACE_PATTERN);
+                    continue;
+                }
 
                 if (line.startsWith("#EXTINF")) {
                     pendingChannel = new Channel();
@@ -139,6 +158,13 @@ public class M3uParser {
                             extractPattern(line, HTTP_USER_AGENT_PATTERN));
                     putHeader(pendingChannel, HEADER_REFERER,
                             extractPattern(line, HTTP_REFERRER_PATTERN));
+                    // A channel's own catchup wins; otherwise inherit the playlist default.
+                    pendingChannel.catchupType = firstNonEmpty(
+                            extractPattern(line, CATCHUP_PATTERN), defaultCatchupType);
+                    pendingChannel.catchupSource = firstNonEmpty(
+                            extractPattern(line, CATCHUP_SOURCE_PATTERN), defaultCatchupSource);
+                    pendingChannel.catchupReplace = firstNonEmpty(
+                            extractPattern(line, CATCHUP_REPLACE_PATTERN), defaultCatchupReplace);
                     continue;
                 }
 
@@ -276,6 +302,11 @@ public class M3uParser {
             return matcher.group(1).trim();
         }
         return "";
+    }
+
+    /** @return the first non-empty value, falling back to the default. */
+    private static String firstNonEmpty(String value, String fallback) {
+        return value != null && !value.isEmpty() ? value : fallback;
     }
 
     private static boolean isValidUrl(String url) {

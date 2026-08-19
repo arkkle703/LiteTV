@@ -20,6 +20,16 @@ public class Channel {
     /** Request headers the source needs (User-Agent, Referer, ...), or null when it needs none. */
     public Map<String, String> headers;
 
+    /**
+     * Catchup (回看/时移) attributes from the playlist. {@code catchup} is the mode
+     * ("default", "append", ...), {@code catchupSource} the URL template with time
+     * placeholders, {@code catchupReplace} an optional regex/replacement pair for append mode.
+     * All empty when the channel has no catchup.
+     */
+    public String catchupType = "";
+    public String catchupSource = "";
+    public String catchupReplace = "";
+
     public Channel() {
     }
 
@@ -55,6 +65,11 @@ public class Channel {
 
     public boolean hasUrl(String url) {
         return url != null && urls.contains(url);
+    }
+
+    /** True when the playlist declared a catchup source for this channel. */
+    public boolean hasCatchup() {
+        return catchupSource != null && !catchupSource.isEmpty();
     }
 
     public List<String> getUrls() {

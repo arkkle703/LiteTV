@@ -31,3 +31,12 @@ keystore/
 *.jks
 *.p12
 *.pfx
+
+# Local dev helper script (not part of the project)
+/run-emulator.sh
+
+# reference files
+/refs
+
+# Local-only agent instructions / dev notes
+/AGENTS.md

@@ -18,6 +18,7 @@ import com.cabletv.player.config.KeyMapping;
 import com.cabletv.player.model.Channel;
 import com.cabletv.player.epg.EpgManager;
 import com.cabletv.player.server.ConfigWebServer;
+import com.cabletv.player.util.CatchupUrlBuilder;
 import xyz.doikki.videoplayer.player.VideoView;
 import xyz.doikki.videoplayer.exo.ExoMediaPlayerFactory;
 
@@ -54,13 +55,24 @@ public class MainActivity extends Activity {
     private int mCurrentUrlIndex = 0;
     private boolean mDestroyed = false;
 
+    /** Catchup (回看) playback: playing a time-shifted stream instead of live. */
+    private boolean mCatchupActive = false;
+    private Channel mCatchupChannel = null;
+    private EpgManager.Program mCatchupProgram = null;
+    /** The catchup playhead (programme start + accumulated seek offset), in epoch millis. */
+    private long mCatchupPlayheadMs = 0;
+    private static final long CATCHUP_SEEK_STEP_MS = 10 * 1000L;
+    /** How far past "now" a still-airing programme's window may extend before the server catches up. */
+    private static final long CATCHUP_LIVE_TAIL_MS = 8 * 60 * 60 * 1000L;
+    private final Runnable mCatchupSeekHideRunnable = this::hideCatchupSeekIndicator;
+
     /** How long the digits typed on the remote stay on screen before they tune a channel. */
     private static final long NUMBER_INPUT_TIMEOUT_MS = 2_000;
     private static final int MAX_CHANNEL_DIGITS = 4;
     private final StringBuilder mNumberInput = new StringBuilder();
     private final Runnable mNumberCommitRunnable = this::commitNumberInput;
 
-    /** How long OK must be held to mean "favourite this channel" rather than "select". */
+    /** How long OK must be held to mean "long press" rather than "select". */
     private static final long OK_LONG_PRESS_MS = 600;
     private final Runnable mOkLongPressRunnable = this::onOkLongPress;
     private boolean mOkLongPressFired = false;
@@ -305,8 +317,9 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Marks or unmarks the channel the viewer is pointing at: the highlighted one when the list is
-     * open, otherwise the one on screen.
+     * Long-press OK has two meanings depending on where the cursor is: over a programme it
+     * replays (回看), over a channel it toggles the favourite star, and on the full-screen
+     * player it replays the programme currently on air.
      */
     private void onOkLongPress() {
         if (mOkLongPressFired) {
@@ -315,12 +328,41 @@ public class MainActivity extends Activity {
         mOkLongPressFired = true;
         mMainHandler.removeCallbacks(mOkLongPressRunnable);
 
-        Channel target = mChannelListVisible && mChannelListComponent != null
-                ? mChannelListComponent.getSelectedChannel()
-                : mChannelRepository.getChannel(mCurrentChannelIndex);
-        if (target == null) {
+        if (mChannelListVisible && mChannelListComponent != null) {
+            if (mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.PROGRAMS) {
+                Channel channel = mChannelListComponent.getSelectedChannel();
+                EpgManager.Program program = mChannelListComponent.getSelectedProgram();
+                if (channel == null || program == null) {
+                    android.widget.Toast.makeText(this, R.string.catchup_no_program,
+                            android.widget.Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                playCatchup(channel, program);
+                return;
+            }
+            // Channel / group column: long-press OK manages favourites.
+            Channel target = mChannelListComponent.getSelectedChannel();
+            if (target != null) {
+                toggleFavorite(target);
+            }
             return;
         }
+
+        // Full-screen playback: long-press OK replays the programme currently on air.
+        Channel current = mChannelRepository.getChannel(mCurrentChannelIndex);
+        if (current == null) {
+            return;
+        }
+        EpgManager.Program program = mEpgManager.getCurrentProgram(current);
+        if (program == null) {
+            android.widget.Toast.makeText(this, R.string.catchup_no_program,
+                    android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        playCatchup(current, program);
+    }
+
+    private void toggleFavorite(Channel target) {
         boolean nowFavorite = mNavigator.toggleFavorite(target);
         Log.i(TAG, (nowFavorite ? "Favourited: " : "Unfavourited: ") + target.name);
         if (mChannelListComponent != null) {
@@ -330,6 +372,115 @@ public class MainActivity extends Activity {
                 getString(nowFavorite ? R.string.favorite_added : R.string.favorite_removed,
                         target.name),
                 android.widget.Toast.LENGTH_SHORT).show();
+    }
+
+    /** Starts time-shifted playback of the given programme, or explains why it cannot. */
+    private void playCatchup(Channel channel, EpgManager.Program program) {
+        if (channel == null || program == null) {
+            android.widget.Toast.makeText(this, R.string.catchup_no_program,
+                    android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!channel.hasCatchup()) {
+            android.widget.Toast.makeText(this, R.string.catchup_not_available,
+                    android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        long now = System.currentTimeMillis();
+        long start = program.startTime;
+        if (start >= now) {
+            start = now - CATCHUP_SEEK_STEP_MS; // never ask for a window that starts in the future
+        }
+        String url = CatchupUrlBuilder.buildUrl(channel, start, catchupWindowEnd(program, now));
+        if (url == null) {
+            android.widget.Toast.makeText(this, R.string.catchup_not_available,
+                    android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        cancelReconnect();
+        mCatchupActive = true;
+        mCatchupChannel = channel;
+        mCatchupProgram = program;
+        mCatchupPlayheadMs = start;
+        mCurrentUrlIndex = 0;
+        // Leave the list so the replayed stream is visible; short OK reopens it.
+        if (mChannelListVisible) {
+            hideChannelList();
+            mChannelListVisible = false;
+        }
+        Log.i(TAG, "Catchup: " + channel.name + " · " + program.title + " → " + url);
+        runOnUiThread(() -> {
+            mVideoView.switchUrl(url, channel.headers);
+            mVideoView.start();
+            if (mChannelListComponent != null) {
+                mChannelListComponent.setCurrentChannel(mCurrentChannelIndex);
+            }
+        });
+        if (mPlaybackInfoComponent != null) {
+            mPlaybackInfoComponent.showChannelInfo(channel);
+        }
+        android.widget.Toast.makeText(this,
+                getString(R.string.catchup_started, program.title),
+                android.widget.Toast.LENGTH_SHORT).show();
+        mEpgManager.loadEpg(channel);
+    }
+
+    /** The end of the playseek window: a past programme ends at its stop time, a live one in the
+     *  near future so the stream keeps flowing once it catches up. */
+    private long catchupWindowEnd(EpgManager.Program program, long now) {
+        return program.endTime > now ? now + CATCHUP_LIVE_TAIL_MS : program.endTime;
+    }
+
+    /** Rewinds or fast-forwards the catchup playhead by rebuilding the playseek window. */
+    private void seekCatchup(long deltaMs) {
+        if (!mCatchupActive || mCatchupChannel == null || mCatchupProgram == null) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        long minPlayhead = mCatchupProgram.startTime;
+        long maxPlayhead = now - CATCHUP_SEEK_STEP_MS;
+        long target = Math.max(minPlayhead, Math.min(mCatchupPlayheadMs + deltaMs, maxPlayhead));
+        if (target == mCatchupPlayheadMs) {
+            return;
+        }
+        mCatchupPlayheadMs = target;
+        String url = CatchupUrlBuilder.buildUrl(mCatchupChannel, mCatchupPlayheadMs,
+                catchupWindowEnd(mCatchupProgram, now));
+        if (url == null) {
+            return;
+        }
+        Log.i(TAG, "Catchup seek to +" + ((mCatchupPlayheadMs - mCatchupProgram.startTime) / 1000) + "s");
+        runOnUiThread(() -> mVideoView.switchUrl(url, mCatchupChannel.headers));
+        showCatchupSeekIndicator((mCatchupPlayheadMs - mCatchupProgram.startTime) / 1000);
+    }
+
+    private void showCatchupSeekIndicator(long offsetSec) {
+        String label = (offsetSec >= 0 ? "+" : "-") + Math.abs(offsetSec) + "s";
+        mChannelNumberView.showDigits(label, mCatchupChannel.name);
+        mMainHandler.removeCallbacks(mCatchupSeekHideRunnable);
+        mMainHandler.postDelayed(mCatchupSeekHideRunnable, 1500);
+    }
+
+    private void hideCatchupSeekIndicator() {
+        if (!isNumberInputActive()) {
+            mChannelNumberView.hide();
+        }
+    }
+
+    /** Leaves catchup and returns to the live stream of the channel being watched. */
+    private void exitCatchupToLive() {
+        if (!mCatchupActive) {
+            return;
+        }
+        Log.i(TAG, "Exiting catchup, returning to live");
+        mCatchupActive = false;
+        mCatchupChannel = null;
+        mCatchupProgram = null;
+        mCatchupPlayheadMs = 0;
+        android.widget.Toast.makeText(this, R.string.catchup_exited,
+                android.widget.Toast.LENGTH_SHORT).show();
+        playChannel(mCurrentChannelIndex);
     }
 
     /** @return 0-9 for the number actions, or -1 for anything else. */
@@ -485,6 +636,10 @@ public class MainActivity extends Activity {
     /** Left steps back through the three columns: programmes, channels, groups. */
     private void handleFocusLeft() {
         if (!mChannelListVisible || mChannelListComponent == null) {
+            // Full-screen LEFT rewinds the catchup playhead; in live playback it does nothing.
+            if (mCatchupActive) {
+                seekCatchup(-CATCHUP_SEEK_STEP_MS);
+            }
             return;
         }
         if (mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.PROGRAMS) {
@@ -499,6 +654,10 @@ public class MainActivity extends Activity {
     /** Right steps forward through the three columns: groups, channels, programmes. */
     private void handleFocusRight() {
         if (!mChannelListVisible || mChannelListComponent == null) {
+            // Full-screen RIGHT fast-forwards the catchup playhead.
+            if (mCatchupActive) {
+                seekCatchup(CATCHUP_SEEK_STEP_MS);
+            }
             return;
         }
         if (mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.GROUPS) {
@@ -518,6 +677,17 @@ public class MainActivity extends Activity {
                     // OK on a group means "let me pick from this one", not "play something"
                     mChannelListComponent.moveFocusToChannels();
                     return;
+                }
+                if (mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.PROGRAMS) {
+                    // OK on a programme replays it (回看); this is the natural "select" action, so
+                    // it must not play the live channel the way a channel-row click does.
+                    Channel channel = mChannelListComponent.getSelectedChannel();
+                    EpgManager.Program program = mChannelListComponent.getSelectedProgram();
+                    if (channel != null && program != null && channel.hasCatchup()) {
+                        playCatchup(channel, program);
+                        return;
+                    }
+                    // No catchup or no programme: fall through so OK still does something useful.
                 }
                 // The group the channel was picked from is the one the channel keys walk from now on
                 mNavigator.setCurrentGroupIndex(mChannelListComponent.getBrowsedGroupIndex());
@@ -597,6 +767,8 @@ public class MainActivity extends Activity {
         } else if (mChannelListVisible) {
             hideChannelList();
             mChannelListVisible = false;
+        } else if (mCatchupActive) {
+            exitCatchupToLive();
         } else {
             onBackPressed();
         }
@@ -604,6 +776,11 @@ public class MainActivity extends Activity {
 
     private void playChannel(int index) {
         Log.d(TAG, "playChannel called with index: " + index);
+        // Switching channels (or returning to live) always leaves catchup.
+        mCatchupActive = false;
+        mCatchupChannel = null;
+        mCatchupProgram = null;
+        mCatchupPlayheadMs = 0;
         // A deliberate channel change cancels any pending reconnect for the previous channel
         cancelReconnect();
         Channel channel = mChannelRepository.getChannel(index);
@@ -652,6 +829,12 @@ public class MainActivity extends Activity {
                 break;
             case VideoView.STATE_ERROR:
             case VideoView.STATE_PLAYBACK_COMPLETED:
+                if (mCatchupActive) {
+                    // A catchup stream ended (a past programme finished) or broke: fall back to
+                    // the live channel instead of hammering the catchup server.
+                    exitCatchupToLive();
+                    break;
+                }
                 // Live streams should never complete; when they do, the source dropped us.
                 // A dead source is worth replacing before waiting: try the channel's other
                 // URLs first, and only back off once none of them work.

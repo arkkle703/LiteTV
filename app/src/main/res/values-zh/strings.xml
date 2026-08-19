@@ -62,4 +62,9 @@
     <string name="epg_preference_saved">EPG 来源优先级已保存</string>
     <string name="epg_m3u_embedded_found">M3U 内置 EPG：%1$s</string>
     <string name="epg_m3u_embedded_none">当前 M3U 未提供内置 EPG</string>
+
+    <string name="catchup_started">回看 · %1$s</string>
+    <string name="catchup_exited">已返回直播</string>
+    <string name="catchup_not_available">该频道不支持回看</string>
+    <string name="catchup_no_program">暂无节目可回看</string>
 </resources>
