@@ -67,4 +67,9 @@
     <string name="catchup_exited">已返回直播</string>
     <string name="catchup_not_available">该频道不支持回看</string>
     <string name="catchup_no_program">暂无节目可回看</string>
+
+    <string name="exit_confirm_title">退出 LiteTV？</string>
+    <string name="exit_confirm_message">确定要退出吗？</string>
+    <string name="exit_confirm">同意</string>
+    <string name="exit_cancel">取消</string>
 </resources>

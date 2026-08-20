@@ -67,4 +67,9 @@
     <string name="catchup_exited">Returned to live TV</string>
     <string name="catchup_not_available">This channel does not support catchup</string>
     <string name="catchup_no_program">No programme available to replay</string>
+
+    <string name="exit_confirm_title">Exit LiteTV?</string>
+    <string name="exit_confirm_message">Are you sure you want to exit?</string>
+    <string name="exit_confirm">Confirm</string>
+    <string name="exit_cancel">Cancel</string>
 </resources>

@@ -1,6 +1,8 @@
 package com.cabletv.player.ui;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.media.AudioManager;
 import android.os.Bundle;
@@ -8,6 +10,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 import android.view.KeyEvent;
+import android.widget.Button;
 import android.widget.FrameLayout;
 
 import com.cabletv.player.R;
@@ -337,6 +340,11 @@ public class MainActivity extends Activity {
                             android.widget.Toast.LENGTH_SHORT).show();
                     return;
                 }
+                // The replayed programme belongs to the highlighted channel, which becomes the
+                // current one: BACK from catchup must land on *its* live stream, not the one
+                // that was playing before the list opened.
+                mCurrentChannelIndex = mChannelListComponent.getSelectedChannelIndex();
+                mNavigator.setCurrentGroupIndex(mChannelListComponent.getBrowsedGroupIndex());
                 playCatchup(channel, program);
                 return;
             }
@@ -684,6 +692,10 @@ public class MainActivity extends Activity {
                     Channel channel = mChannelListComponent.getSelectedChannel();
                     EpgManager.Program program = mChannelListComponent.getSelectedProgram();
                     if (channel != null && program != null && channel.hasCatchup()) {
+                        // Remember the highlighted channel as current so exiting the replay lands
+                        // on this channel's live stream, not the previously playing one.
+                        mCurrentChannelIndex = mChannelListComponent.getSelectedChannelIndex();
+                        mNavigator.setCurrentGroupIndex(mChannelListComponent.getBrowsedGroupIndex());
                         playCatchup(channel, program);
                         return;
                     }
@@ -770,7 +782,24 @@ public class MainActivity extends Activity {
         } else if (mCatchupActive) {
             exitCatchupToLive();
         } else {
-            onBackPressed();
+            showExitConfirmDialog();
+        }
+    }
+
+    /** Asks before leaving the player, with the confirm button focused by default. */
+    private void showExitConfirmDialog() {
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.exit_confirm_title)
+                .setMessage(R.string.exit_confirm_message)
+                .setPositiveButton(R.string.exit_confirm, (d, which) -> finish())
+                .setNegativeButton(R.string.exit_cancel, (d, which) -> d.dismiss())
+                .create();
+        dialog.show();
+        // Default the focus to "同意退出" so a single OK confirms; LEFT/RIGHT moves to
+        // 取消 and BACK dismisses the dialog without leaving the app.
+        Button confirm = dialog.getButton(DialogInterface.BUTTON_POSITIVE);
+        if (confirm != null) {
+            confirm.requestFocus();
         }
     }
 
