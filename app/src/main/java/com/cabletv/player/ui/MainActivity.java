@@ -68,6 +68,8 @@ public class MainActivity extends Activity {
     /** The catchup playhead (programme start + accumulated seek offset), in epoch millis. */
     private long mCatchupPlayheadMs = 0;
     private static final long CATCHUP_SEEK_STEP_MS = 10 * 1000L;
+    /** How far to rewind from "now" when live LEFT enters 回看 without EPG data. */
+    private static final long CATCHUP_REWIND_MS = 2 * 60 * 1000L;
     /** How far past "now" a still-airing programme's window may extend before the server catches up. */
     private static final long CATCHUP_LIVE_TAIL_MS = 8 * 60 * 60 * 1000L;
     private final Runnable mCatchupSeekHideRunnable = this::hideCatchupSeekIndicator;
@@ -410,7 +412,33 @@ public class MainActivity extends Activity {
         if (start >= now) {
             start = now - CATCHUP_SEEK_STEP_MS; // never ask for a window that starts in the future
         }
-        String url = CatchupUrlBuilder.buildUrl(channel, start, catchupWindowEnd(program, now));
+        startCatchup(channel, start, catchupWindowEnd(program, now), program);
+    }
+
+    /**
+     * Live-mode LEFT enters 回看: replay the current programme from its start, or rewind a fixed
+     * amount when no EPG data is known. No-op on channels without catchup.
+     */
+    private void enterCatchupFromLive() {
+        Channel channel = mChannelRepository.getChannel(mCurrentChannelIndex);
+        if (channel == null || !channel.hasCatchup()) {
+            return;
+        }
+        EpgManager.Program program = mEpgManager.getCurrentProgram(channel);
+        if (program != null) {
+            playCatchup(channel, program);
+            return;
+        }
+        // No EPG: rewind a fixed amount from "now" so the viewer can still step back.
+        long now = System.currentTimeMillis();
+        EpgManager.Program synthetic = new EpgManager.Program(
+                channel.name, now - CATCHUP_REWIND_MS, now + CATCHUP_LIVE_TAIL_MS);
+        startCatchup(channel, synthetic.startTime, synthetic.endTime, synthetic);
+    }
+
+    /** Common catchup start: build the playseek URL, arm the state, switch the player. */
+    private void startCatchup(Channel channel, long startMs, long endMs, EpgManager.Program program) {
+        String url = CatchupUrlBuilder.buildUrl(channel, startMs, endMs);
         if (url == null) {
             android.widget.Toast.makeText(this, R.string.catchup_not_available,
                     android.widget.Toast.LENGTH_SHORT).show();
@@ -421,7 +449,7 @@ public class MainActivity extends Activity {
         mCatchupActive = true;
         mCatchupChannel = channel;
         mCatchupProgram = program;
-        mCatchupPlayheadMs = start;
+        mCatchupPlayheadMs = startMs;
         mCurrentUrlIndex = 0;
         // Leave the list so the replayed stream is visible; short OK reopens it.
         if (mChannelListVisible) {
@@ -660,19 +688,23 @@ public class MainActivity extends Activity {
     /** Left steps back through the three columns: programmes, channels, groups. */
     private void handleFocusLeft() {
         if (!mChannelListVisible || mChannelListComponent == null) {
-            // Full-screen LEFT rewinds the catchup playhead; in live playback it does nothing.
+            // Full-screen LEFT rewinds the catchup playhead; in live playback it enters 回看 so
+            // the viewer can rewind a programme they missed the start of.
             if (mCatchupActive) {
                 seekCatchup(-CATCHUP_SEEK_STEP_MS);
+            } else {
+                enterCatchupFromLive();
             }
             return;
         }
+        // Inside the programme column, LEFT pages the guide one day back instead of leaving the
+        // column; BACK (or the nearest-day boundary) folds back to the channels.
         if (mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.PROGRAMS) {
-            Log.d(TAG, "handleFocusLeft: Moving focus to channels");
-            mChannelListComponent.moveFocusToChannels();
-        } else {
-            Log.d(TAG, "handleFocusLeft: Moving focus to groups");
-            mChannelListComponent.moveFocusToGroups();
+            mChannelListComponent.moveProgramDay(-1);
+            return;
         }
+        Log.d(TAG, "handleFocusLeft: Moving focus to groups");
+        mChannelListComponent.moveFocusToGroups();
     }
 
     /** Right steps forward through the three columns: groups, channels, programmes. */
@@ -684,12 +716,19 @@ public class MainActivity extends Activity {
             }
             return;
         }
-        if (mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.GROUPS) {
-            Log.d(TAG, "handleFocusRight: Moving focus to channels");
-            mChannelListComponent.moveFocusToChannels();
-        } else {
-            Log.d(TAG, "handleFocusRight: Moving focus to programs");
-            mChannelListComponent.moveFocusToPrograms();
+        switch (mChannelListComponent.getFocusPanel()) {
+            case GROUPS:
+                Log.d(TAG, "handleFocusRight: Moving focus to channels");
+                mChannelListComponent.moveFocusToChannels();
+                break;
+            case PROGRAMS:
+                // Inside the programme column, RIGHT pages the guide one day forward.
+                mChannelListComponent.moveProgramDay(1);
+                break;
+            default:
+                Log.d(TAG, "handleFocusRight: Moving focus to programs");
+                mChannelListComponent.moveFocusToPrograms();
+                break;
         }
     }
 
@@ -789,8 +828,10 @@ public class MainActivity extends Activity {
             // BACK abandons a half-typed channel number instead of leaving the app.
             cancelNumberInput();
         } else if (mChannelListVisible && mChannelListComponent != null
-                && mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.GROUPS) {
-            // The group column was a detour: BACK folds it away again rather than closing the menu.
+                && (mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.GROUPS
+                || mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.PROGRAMS)) {
+            // The groups column was a detour, and so is the programmes (day) column: BACK folds
+            // either away again rather than closing the menu.
             mChannelListComponent.moveFocusToChannels();
         } else if (mChannelListVisible) {
             hideChannelList();

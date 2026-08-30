@@ -29,6 +29,7 @@
     <string name="playlist_load_failed_cached">Cannot refresh the playlist (%1$s). Showing the last saved copy.</string>
     <string name="playback_trying_backup">%1$s is not responding, trying source %2$d of %3$d…</string>
     <string name="todays_programs">Today\'s Programs</string>
+    <string name="yesterday_programs">Yesterday\'s Programs</string>
     <string name="no_epg_data">No EPG data</string>
     <string name="next_program">Next: %1$s</string>
     <string name="channel_number_unknown">No such channel</string>

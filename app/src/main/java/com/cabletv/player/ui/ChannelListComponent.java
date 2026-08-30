@@ -19,6 +19,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.cabletv.player.R;
 import com.cabletv.player.config.AppConfig;
 import com.cabletv.player.config.ChannelNavigator;
+import com.cabletv.player.epg.EpgCache;
 import com.cabletv.player.epg.EpgManager;
 import com.cabletv.player.model.Channel;
 import android.util.Log;
@@ -57,6 +58,16 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
     private int mCurrentChannelIndex = 0;
     private int mSelectedChannelIndex = 0;
     private int mSelectedProgramIndex = 0;
+    private TextView mProgramTitleView;
+    /**
+     * Guide day currently shown, relative to today: 0 = today, -1 = yesterday, ... -6.
+     * Navigated with LEFT/RIGHT while the programme column has focus.
+     */
+    private int mDayOffset = 0;
+    private static final int MAX_DAY_BACK = 6;  // today plus six days back = the 7-day window
+    private static final int MAX_DAY_AHEAD = 1; // feeds (51zmt etc.) often carry tomorrow
+    /** Day offsets (within the window) that the selected channel actually has data for. */
+    private java.util.List<Integer> mAvailableDayOffsets = new ArrayList<>();
     private OnChannelSelectedListener mSelectionListener;
     private EpgManager mEpgManager;
     private boolean mProgramListVisible = false;
@@ -170,6 +181,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         programTitle.setTextSize(14);
         programTitle.setPadding(dp2px(12), dp2px(12), dp2px(12), dp2px(8));
         programTitle.setLayoutParams(new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        mProgramTitleView = programTitle;
         mProgramListContainer.addView(programTitle);
 
         mProgramRecyclerView = new RecyclerView(context);
@@ -348,28 +360,105 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         }
 
         List<EpgManager.Program> programs = mEpgManager.getAllPrograms(selectedChannel);
-        if (!programs.isEmpty()) {
-            ProgramListAdapter programAdapter = new ProgramListAdapter(getContext(), programs);
-            mProgramRecyclerView.setAdapter(programAdapter);
-            mProgramListContainer.setVisibility(VISIBLE);
-            mProgramListVisible = true;
+        if (programs.isEmpty()) {
+            hideProgramList();
+            return;
+        }
 
-            // Find and select the currently playing program
+        // Days with data for this channel, relative to today, within the rolling 7-day window.
+        long todayDay = EpgCache.localDayNumber(System.currentTimeMillis());
+        java.util.TreeSet<Integer> available = new java.util.TreeSet<>();
+        for (EpgManager.Program program : programs) {
+            int offset = (int) (EpgCache.localDayNumber(program.startTime) - todayDay);
+            if (offset >= -MAX_DAY_BACK && offset <= MAX_DAY_AHEAD) {
+                available.add(offset);
+            }
+        }
+        mAvailableDayOffsets = new ArrayList<>(available);
+        if (!mAvailableDayOffsets.contains(mDayOffset)) {
+            mDayOffset = nearestAvailableDayOffset();
+        }
+        List<EpgManager.Program> dayPrograms = filterProgramsForDay(programs, mDayOffset);
+        ProgramListAdapter programAdapter = new ProgramListAdapter(getContext(), dayPrograms);
+        mProgramRecyclerView.setAdapter(programAdapter);
+        mProgramListContainer.setVisibility(VISIBLE);
+        mProgramListVisible = true;
+
+        // On today's view, land on the programme airing right now; other days start at the top.
+        int selectIndex = 0;
+        if (mDayOffset == 0) {
             long currentTime = System.currentTimeMillis();
-            int currentProgramIndex = 0;
-            for (int i = 0; i < programs.size(); i++) {
-                EpgManager.Program prog = programs.get(i);
+            for (int i = 0; i < dayPrograms.size(); i++) {
+                EpgManager.Program prog = dayPrograms.get(i);
                 if (currentTime >= prog.startTime && currentTime < prog.endTime) {
-                    currentProgramIndex = i;
+                    selectIndex = i;
                     break;
                 }
             }
-            mSelectedProgramIndex = currentProgramIndex;
-            programAdapter.setSelectedIndex(currentProgramIndex);
-            programAdapter.setFocused(mFocusPanel == FocusPanel.PROGRAMS);
-            scrollToCentered(mProgramRecyclerView, currentProgramIndex, PROGRAM_ROW_HEIGHT_DP);
+        }
+        mSelectedProgramIndex = selectIndex;
+        programAdapter.setSelectedIndex(selectIndex);
+        programAdapter.setFocused(mFocusPanel == FocusPanel.PROGRAMS);
+        scrollToCentered(mProgramRecyclerView, selectIndex, PROGRAM_ROW_HEIGHT_DP);
+        updateProgramTitle();
+    }
+
+    /** Programmes whose start falls on the given day (relative to today). */
+    private List<EpgManager.Program> filterProgramsForDay(List<EpgManager.Program> all, int offset) {
+        long targetDay = EpgCache.localDayNumber(System.currentTimeMillis()) + offset;
+        List<EpgManager.Program> dayPrograms = new ArrayList<>();
+        for (EpgManager.Program program : all) {
+            if (EpgCache.localDayNumber(program.startTime) == targetDay) {
+                dayPrograms.add(program);
+            }
+        }
+        return dayPrograms;
+    }
+
+    /** Nearest offset to today among the available ones (prefers today itself). */
+    private int nearestAvailableDayOffset() {
+        if (mAvailableDayOffsets.isEmpty()) {
+            return 0;
+        }
+        if (mAvailableDayOffsets.contains(0)) {
+            return 0;
+        }
+        int best = mAvailableDayOffsets.get(0);
+        for (Integer offset : mAvailableDayOffsets) {
+            if (Math.abs(offset) < Math.abs(best)) {
+                best = offset;
+            }
+        }
+        return best;
+    }
+
+    /** Moves the guide to the previous/next day that has data for the selected channel. */
+    public void moveProgramDay(int delta) {
+        if (mAvailableDayOffsets.isEmpty()) {
+            return;
+        }
+        int index = mAvailableDayOffsets.indexOf(mDayOffset);
+        int next = Math.max(0, Math.min(mAvailableDayOffsets.size() - 1, index + delta));
+        if (next == index) {
+            return;
+        }
+        mDayOffset = mAvailableDayOffsets.get(next);
+        refreshProgramListForCurrentSelection();
+    }
+
+    private void updateProgramTitle() {
+        if (mProgramTitleView == null) {
+            return;
+        }
+        if (mDayOffset == 0) {
+            mProgramTitleView.setText(R.string.todays_programs);
+        } else if (mDayOffset == -1) {
+            mProgramTitleView.setText(R.string.yesterday_programs);
         } else {
-            hideProgramList();
+            java.util.Calendar day = java.util.Calendar.getInstance();
+            day.add(java.util.Calendar.DAY_OF_YEAR, mDayOffset);
+            mProgramTitleView.setText(
+                    java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM).format(day.getTime()));
         }
     }
 

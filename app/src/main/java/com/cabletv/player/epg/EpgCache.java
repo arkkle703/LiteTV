@@ -34,7 +34,12 @@ public class EpgCache {
     private static final String META_FILE = "epg_meta.json";
     // 2: programmes are keyed by normalised channel name instead of the (non-unique) tvg-id.
     // 3: repeated programmes are dropped at parse time; caches written before that still hold them.
-    private static final int CACHE_VERSION = 3;
+    // 4: keeps a rolling 7-day window (per-channel fetched-day manifest) so the guide can show
+    //    yesterday etc.; older days are pruned on write, and v3 caches are ignored (refetched).
+    private static final int CACHE_VERSION = 4;
+    /** Rolling guide window: today plus up to this many days back (and one day ahead). */
+    private static final int RETENTION_DAYS = 7;
+    private static final int FUTURE_DAYS = 1;
 
     private final File mCacheDir;
     private final File mCacheFile;
@@ -55,7 +60,15 @@ public class EpgCache {
         mGson = new Gson();
     }
 
-    public void savePrograms(Map<String, List<EpgManager.Program>> programsByChannel) {
+    /** Loaded cache contents: programmes plus which days have guide data per channel. */
+    public static class CacheData {
+        public final Map<String, List<EpgManager.Program>> programsByChannel = new HashMap<>();
+        /** dayKey (yyyyMMdd) -> channelKey -> fetch timestamp. */
+        public final Map<String, Map<String, Long>> fetchedDays = new HashMap<>();
+    }
+
+    public void savePrograms(Map<String, List<EpgManager.Program>> programsByChannel,
+                             Map<String, Map<String, Long>> fetchedDays) {
         long timestamp = System.currentTimeMillis();
         File tmp = new File(mCacheDir, CACHE_FILE + ".tmp");
         try {
@@ -68,19 +81,45 @@ public class EpgCache {
             root.addProperty("version", CACHE_VERSION);
             root.addProperty("timestamp", timestamp);
 
+            // Only days inside the rolling window survive a write; tomorrow is kept because the
+            // feeds (51zmt's e.xml etc.) carry it alongside today.
+            long todayDay = localDayNumber(System.currentTimeMillis());
+            long minDay = todayDay - (RETENTION_DAYS - 1);
+            long maxDay = todayDay + FUTURE_DAYS;
+
             JsonObject channelsObj = new JsonObject();
             for (Map.Entry<String, List<EpgManager.Program>> entry : programsByChannel.entrySet()) {
                 JsonArray programsArray = new JsonArray();
                 for (EpgManager.Program prog : entry.getValue()) {
+                    long day = localDayNumber(prog.startTime);
+                    if (day < minDay || day > maxDay) {
+                        continue; // stale day: drop rather than let the window grow forever
+                    }
                     JsonObject progObj = new JsonObject();
                     progObj.addProperty("title", prog.title);
                     progObj.addProperty("startTime", prog.startTime);
                     progObj.addProperty("endTime", prog.endTime);
                     programsArray.add(progObj);
                 }
-                channelsObj.add(entry.getKey(), programsArray);
+                if (programsArray.size() > 0) {
+                    channelsObj.add(entry.getKey(), programsArray);
+                }
             }
             root.add("channels", channelsObj);
+
+            JsonObject daysObj = new JsonObject();
+            for (Map.Entry<String, Map<String, Long>> dayEntry : fetchedDays.entrySet()) {
+                long day = dayKeyToDayNumber(dayEntry.getKey());
+                if (day < minDay || day > maxDay) {
+                    continue;
+                }
+                JsonObject channelsOfDay = new JsonObject();
+                for (Map.Entry<String, Long> channelEntry : dayEntry.getValue().entrySet()) {
+                    channelsOfDay.addProperty(channelEntry.getKey(), channelEntry.getValue());
+                }
+                daysObj.add(dayEntry.getKey(), channelsOfDay);
+            }
+            root.add("days", daysObj);
 
             // Write to a temp file first so a crash or a kill never leaves a truncated cache.
             Writer writer = new BufferedWriter(
@@ -108,7 +147,7 @@ public class EpgCache {
         }
     }
 
-    public Map<String, List<EpgManager.Program>> loadPrograms() {
+    public CacheData loadPrograms() {
         if (!mCacheFile.exists()) {
             Log.d(TAG, "EPG cache file does not exist");
             return null;
@@ -132,27 +171,41 @@ public class EpgCache {
                 mCachedTimestamp = root.getAsJsonPrimitive("timestamp").getAsLong();
             }
 
-            Map<String, List<EpgManager.Program>> programsByChannel = new HashMap<>();
-            JsonObject channelsObj = root.getAsJsonObject("channels");
-
-            for (String channelId : channelsObj.keySet()) {
-                JsonArray programsArray = channelsObj.getAsJsonArray(channelId);
-                List<EpgManager.Program> programs = new ArrayList<>();
-
-                for (int i = 0; i < programsArray.size(); i++) {
-                    JsonObject progObj = programsArray.get(i).getAsJsonObject();
-                    String title = progObj.getAsJsonPrimitive("title").getAsString();
-                    long startTime = progObj.getAsJsonPrimitive("startTime").getAsLong();
-                    long endTime = progObj.getAsJsonPrimitive("endTime").getAsLong();
-                    programs.add(new EpgManager.Program(title, startTime, endTime));
+            CacheData data = new CacheData();
+            JsonObject channelsObj = root.has("channels") ? root.getAsJsonObject("channels") : null;
+            if (channelsObj != null) {
+                for (String channelId : channelsObj.keySet()) {
+                    JsonArray programsArray = channelsObj.getAsJsonArray(channelId);
+                    List<EpgManager.Program> programs = new ArrayList<>();
+                    for (int i = 0; i < programsArray.size(); i++) {
+                        JsonObject progObj = programsArray.get(i).getAsJsonObject();
+                        String title = progObj.getAsJsonPrimitive("title").getAsString();
+                        long startTime = progObj.getAsJsonPrimitive("startTime").getAsLong();
+                        long endTime = progObj.getAsJsonPrimitive("endTime").getAsLong();
+                        programs.add(new EpgManager.Program(title, startTime, endTime));
+                    }
+                    if (programs.size() > 0) {
+                        data.programsByChannel.put(channelId, programs);
+                    }
                 }
-
-                programsByChannel.put(channelId, programs);
+            }
+            JsonObject daysObj = root.has("days") ? root.getAsJsonObject("days") : null;
+            if (daysObj != null) {
+                for (String dayKey : daysObj.keySet()) {
+                    JsonObject channelsOfDay = daysObj.getAsJsonObject(dayKey);
+                    Map<String, Long> channelTimes = new HashMap<>();
+                    for (String channelId : channelsOfDay.keySet()) {
+                        channelTimes.put(channelId,
+                                channelsOfDay.getAsJsonPrimitive(channelId).getAsLong());
+                    }
+                    data.fetchedDays.put(dayKey, channelTimes);
+                }
             }
 
-            Log.d(TAG, "✓ EPG cache loaded from " + mCacheFile.getAbsolutePath() +
-                    " (" + programsByChannel.size() + " channels)");
-            return programsByChannel;
+            Log.d(TAG, "✓ EPG cache loaded from " + mCacheFile.getAbsolutePath()
+                    + " (" + data.programsByChannel.size() + " channels, "
+                    + data.fetchedDays.size() + " days)");
+            return data;
         } catch (Exception e) {
             Log.e(TAG, "Error loading EPG cache: " + e.getMessage(), e);
             return null;
@@ -255,12 +308,50 @@ public class EpgCache {
 
     /** Day boundaries follow the device's timezone, not UTC. */
     private static boolean isSameLocalDay(long first, long second) {
-        Calendar a = Calendar.getInstance();
-        a.setTimeInMillis(first);
-        Calendar b = Calendar.getInstance();
-        b.setTimeInMillis(second);
-        return a.get(Calendar.YEAR) == b.get(Calendar.YEAR)
-                && a.get(Calendar.DAY_OF_YEAR) == b.get(Calendar.DAY_OF_YEAR);
+        return localDayNumber(first) == localDayNumber(second);
+    }
+
+    /** Monotonic local calendar day (year*372 + day-of-year), stable across midnight. */
+    public static long localDayNumber(long millis) {
+        Calendar calendar = Calendar.getInstance();
+        calendar.setTimeInMillis(millis);
+        return calendar.get(Calendar.YEAR) * 372L + calendar.get(Calendar.DAY_OF_YEAR);
+    }
+
+    /** Key used in the fetched-day manifest and the UI's day selection. */
+    public static String dayKey(long millis) {
+        Calendar calendar = Calendar.getInstance();
+        calendar.setTimeInMillis(millis);
+        StringBuilder key = new StringBuilder(8);
+        key.append(calendar.get(Calendar.YEAR));
+        appendTwoDigits(key, calendar.get(Calendar.MONTH) + 1);
+        appendTwoDigits(key, calendar.get(Calendar.DAY_OF_MONTH));
+        return key.toString();
+    }
+
+    private static void appendTwoDigits(StringBuilder out, int value) {
+        if (value < 10) {
+            out.append('0');
+        }
+        out.append(value);
+    }
+
+    private static long dayKeyToDayNumber(String dayKey) {
+        try {
+            if (dayKey == null || dayKey.length() < 8) {
+                return Long.MAX_VALUE; // unparsable: fall outside the retained window
+            }
+            int year = Integer.parseInt(dayKey.substring(0, 4));
+            int month = Integer.parseInt(dayKey.substring(4, 6));
+            int day = Integer.parseInt(dayKey.substring(6, 8));
+            Calendar calendar = Calendar.getInstance();
+            calendar.set(Calendar.YEAR, year);
+            calendar.set(Calendar.MONTH, month - 1);
+            calendar.set(Calendar.DAY_OF_MONTH, day);
+            return localDayNumber(calendar.getTimeInMillis());
+        } catch (NumberFormatException e) {
+            return Long.MAX_VALUE;
+        }
     }
 
     private static void closeQuietly(Closeable closeable) {

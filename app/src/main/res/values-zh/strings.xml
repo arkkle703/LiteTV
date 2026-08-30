@@ -29,6 +29,7 @@
     <string name="playlist_load_failed_cached">无法刷新播放列表（%1$s），正在显示上次保存的副本。</string>
     <string name="playback_trying_backup">%1$s 无响应，正在尝试第 %2$d/%3$d 个源…</string>
     <string name="todays_programs">今日节目</string>
+    <string name="yesterday_programs">昨日节目</string>
     <string name="no_epg_data">暂无节目单</string>
     <string name="next_program">下一个：%1$s</string>
     <string name="channel_number_unknown">无此频道</string>

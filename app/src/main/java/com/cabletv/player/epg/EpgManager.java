@@ -80,6 +80,12 @@ public class EpgManager {
             Executors.newSingleThreadExecutor(runnable -> new Thread(runnable, "epg"));
     /** Programmes per channel key, sorted by start time. See {@link #channelKey(Channel)}. */
     private final Map<String, List<Program>> mProgramsByChannel = new ConcurrentHashMap<>();
+    /**
+     * Which local days hold guide data per channel (dayKey -> channelKey -> fetchedAt). This is
+     * what lets the guide show yesterday etc.: the feed is fetched roughly daily and the cache
+     * keeps a rolling 7-day window instead of replacing everything each time.
+     */
+    private final Map<String, Map<String, Long>> mFetchedDays = new ConcurrentHashMap<>();
     /** Channel keys with a DIYP request in flight; XMLTV needs no such set (one load covers all). */
     private final Set<String> mPendingDiypKeys = Collections.synchronizedSet(new HashSet<String>());
 
@@ -285,6 +291,7 @@ public class EpgManager {
      */
     private void resetEpgData() {
         mProgramsByChannel.clear();
+        mFetchedDays.clear();
         mBulkLoadDone = false;
         mBulkRetryAfter = 0;
         submit(mCache::clearCache);
@@ -362,29 +369,76 @@ public class EpgManager {
                         + channels.size() + " channels");
                 continue;
             }
-            mProgramsByChannel.putAll(parsed);
+            // Merge instead of replace: yesterday's programmes live alongside today's so the
+            // guide can page back through the rolling window.
+            mergeBulkParse(parsed);
             Log.i(TAG, "✓ EPG loaded for " + parsed.size() + "/" + channels.size()
                     + " channels from " + epgUrl);
-            mCache.savePrograms(mProgramsByChannel);
+            mCache.savePrograms(mProgramsByChannel, mFetchedDays);
+            notifyEpgUpdated();
             return true;
         }
         return false;
     }
 
+    /**
+     * Merges a freshly parsed bulk feed into the rolling store. The days the feed carries are
+     * superseded (a later feed is more accurate), older days from previous fetches survive, and
+     * the fetched-day manifest is updated so a later session can prune or page them.
+     */
+    private void mergeBulkParse(Map<String, List<Program>> parsed) {
+        long now = System.currentTimeMillis();
+        // The day keys covered by this download.
+        Set<String> coveredDays = new HashSet<>();
+        for (List<Program> programs : parsed.values()) {
+            for (Program program : programs) {
+                coveredDays.add(EpgCache.dayKey(program.startTime));
+            }
+        }
+        if (coveredDays.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<String, List<Program>> entry : parsed.entrySet()) {
+            String channelKey = entry.getKey();
+            List<Program> existing = mProgramsByChannel.get(channelKey);
+            List<Program> kept = new ArrayList<>();
+            if (existing != null) {
+                for (Program program : existing) {
+                    if (!coveredDays.contains(EpgCache.dayKey(program.startTime))) {
+                        kept.add(program); // from earlier fetches, not in this feed: keep
+                    }
+                }
+            }
+            kept.addAll(entry.getValue());
+            normalizeProgramList(kept);
+            mProgramsByChannel.put(channelKey, kept);
+            for (String day : coveredDays) {
+                Map<String, Long> channelsOfDay = mFetchedDays.get(day);
+                if (channelsOfDay == null) {
+                    channelsOfDay = new HashMap<>();
+                    mFetchedDays.put(day, channelsOfDay);
+                }
+                channelsOfDay.put(channelKey, now);
+            }
+        }
+    }
+
     /** Reads the cache into memory. Returns true if anything was found. Runs on the EPG thread. */
     private boolean loadCacheIntoMemory() {
-        Map<String, List<Program>> cached = mCache.loadPrograms();
-        if (cached == null || cached.isEmpty()) {
+        EpgCache.CacheData cached = mCache.loadPrograms();
+        if (cached == null || cached.programsByChannel.isEmpty()) {
             Log.d(TAG, "No usable EPG cache");
             return false;
         }
-        for (Map.Entry<String, List<Program>> entry : cached.entrySet()) {
+        for (Map.Entry<String, List<Program>> entry : cached.programsByChannel.entrySet()) {
             List<Program> programs = entry.getValue();
             if (programs != null && !programs.isEmpty()) {
                 mProgramsByChannel.put(entry.getKey(), Collections.unmodifiableList(programs));
             }
         }
-        Log.d(TAG, "✓ EPG cache loaded for " + cached.size() + " channels");
+        mFetchedDays.clear();
+        mFetchedDays.putAll(cached.fetchedDays);
+        Log.d(TAG, "✓ EPG cache loaded for " + cached.programsByChannel.size() + " channels");
         notifyEpgUpdated();
         return true;
     }
@@ -706,13 +760,15 @@ public class EpgManager {
                     return;
                 }
                 mProgramsByChannel.put(key, Collections.unmodifiableList(programs));
+                // Record the fetched day so the rolling window knows this channel has data for it.
+                long now = System.currentTimeMillis();
+                markFetchedDay(EpgCache.dayKey(now), key, now);
                 Log.d(TAG, "✓ DIYP EPG: " + programs.size() + " programmes for " + channel.name);
                 // Rewriting the whole cache after every single channel would mean one full write
                 // per channel while the user browses the list.
-                long now = System.currentTimeMillis();
                 if (now - mLastCacheSaveAt > DIYP_CACHE_SAVE_INTERVAL_MS) {
                     mLastCacheSaveAt = now;
-                    mCache.savePrograms(mProgramsByChannel);
+                    mCache.savePrograms(mProgramsByChannel, mFetchedDays);
                 }
                 notifyEpgUpdated();
             } catch (Exception e) {
@@ -721,6 +777,15 @@ public class EpgManager {
                 mPendingDiypKeys.remove(key);
             }
         });
+    }
+
+    private void markFetchedDay(String dayKey, String channelKey, long fetchedAt) {
+        Map<String, Long> channelsOfDay = mFetchedDays.get(dayKey);
+        if (channelsOfDay == null) {
+            channelsOfDay = new HashMap<>();
+            mFetchedDays.put(dayKey, channelsOfDay);
+        }
+        channelsOfDay.put(channelKey, fetchedAt);
     }
 
     private List<Program> fetchDiypPrograms(Channel channel, String baseUrl) throws IOException {
