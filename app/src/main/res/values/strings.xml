@@ -55,6 +55,19 @@
     <string name="save">Save</string>
     <string name="show_epg_in_channel_list">Show EPG in channel list</string>
 
+    <string name="local_m3u_file">Local M3U File</string>
+    <string name="m3u_file_pick">Select M3U file…</string>
+    <string name="m3u_file_clear">Remove local file</string>
+    <string name="m3u_file_none">No local file — the M3U URL above is used.</string>
+    <string name="m3u_file_selected">Using local file: %1$s</string>
+    <string name="m3u_file_missing">Stored file %1$s is missing — pick it again.</string>
+    <string name="m3u_file_saved">Local M3U file saved</string>
+    <string name="m3u_file_cleared">Local M3U file removed</string>
+    <string name="m3u_file_pick_error">Cannot open the file picker on this device</string>
+    <string name="m3u_file_copy_error">Cannot read the selected file</string>
+    <string name="m3u_file_too_large">The file is too large (max 8 MB)</string>
+    <string name="m3u_file_priority_hint">While a local file is set, it takes priority over the URL above.</string>
+
     <string name="epg_preference">EPG Source Priority</string>
     <string name="epg_preference_auto">Auto: my EPG first, fall back to the one in the M3U</string>
     <string name="epg_preference_m3u">Prefer the EPG embedded in the M3U</string>

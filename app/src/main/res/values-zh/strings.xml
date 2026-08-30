@@ -55,6 +55,19 @@
     <string name="save">保存</string>
     <string name="show_epg_in_channel_list">在频道列表显示节目单</string>
 
+    <string name="local_m3u_file">本地 M3U 文件</string>
+    <string name="m3u_file_pick">选择 M3U 文件…</string>
+    <string name="m3u_file_clear">移除本地文件</string>
+    <string name="m3u_file_none">未使用本地文件，使用上方 M3U 地址。</string>
+    <string name="m3u_file_selected">正在使用本地文件：%1$s</string>
+    <string name="m3u_file_missing">存储的文件 %1$s 不存在，请重新选择。</string>
+    <string name="m3u_file_saved">本地 M3U 文件已保存</string>
+    <string name="m3u_file_cleared">已移除本地 M3U 文件</string>
+    <string name="m3u_file_pick_error">此设备无法打开文件选择器</string>
+    <string name="m3u_file_copy_error">无法读取所选文件</string>
+    <string name="m3u_file_too_large">文件过大（最大 8 MB）</string>
+    <string name="m3u_file_priority_hint">设置本地文件后优先于上方 M3U 地址。</string>
+
     <string name="epg_preference">EPG 来源优先级</string>
     <string name="epg_preference_auto">自动：优先使用我设置的 EPG，未设置时用 M3U 内置</string>
     <string name="epg_preference_m3u">优先使用 M3U 内置 EPG</string>

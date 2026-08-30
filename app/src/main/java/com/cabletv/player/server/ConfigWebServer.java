@@ -1,12 +1,14 @@
 package com.cabletv.player.server;
 
 import android.content.Context;
+import android.text.TextUtils;
 import android.util.Log;
 
 import com.cabletv.player.config.AppConfig;
 import com.google.gson.JsonObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -49,6 +51,8 @@ public class ConfigWebServer {
         void onM3uUrlChanged(String newUrl);
         void onEpgUrlChanged(String newUrl);
         void onEpgPreferenceChanged(String preference);
+        /** The local playlist was cleared (newPath is empty) from the web page. */
+        void onM3uFileChanged(String newPath);
     }
 
     /** Cleared by the Activity in onDestroy(); volatile because server threads read it. */
@@ -230,6 +234,9 @@ public class ConfigWebServer {
             } else if ("POST".equals(method) && "/config/epg-preference".equals(path)) {
                 response = handleEpgPreferencePost(body);
                 contentType = "application/json";
+            } else if ("POST".equals(method) && "/config/m3u-file-clear".equals(path)) {
+                response = handleM3uFileClear();
+                contentType = "application/json";
             } else {
                 sendResponse(socket, "404 Not Found", 404, "text/plain");
                 return;
@@ -400,9 +407,36 @@ public class ConfigWebServer {
         return json.toString();
     }
 
+    /** Removes the local playlist so the configured URL becomes the source again. */
+    private static String handleM3uFileClear() {
+        try {
+            String path = AppConfig.getM3uFilePath();
+            if (!TextUtils.isEmpty(path)) {
+                //noinspection ResultOfMethodCallIgnored
+                new File(path).delete();
+            }
+            AppConfig.setM3uFilePath("");
+            OnConfigChangeListener listener = sConfigChangeListener;
+            if (listener != null) {
+                listener.onM3uFileChanged("");
+            }
+            JsonObject json = new JsonObject();
+            json.addProperty("success", true);
+            json.addProperty("message", "Local M3U file removed");
+            return json.toString();
+        } catch (Exception e) {
+            Log.e(TAG, "Error clearing local M3U file", e);
+        }
+        JsonObject json = new JsonObject();
+        json.addProperty("success", false);
+        json.addProperty("message", "Failed to clear local M3U file");
+        return json.toString();
+    }
+
     private static String getConfigJson() {
         JsonObject config = new JsonObject();
         config.addProperty("m3u_url", AppConfig.getM3uUrl());
+        config.addProperty("m3u_file_path", AppConfig.getM3uFilePath());
         config.addProperty("epg_url", AppConfig.getEpgUrl());
         config.addProperty("epg_preference", AppConfig.getEpgPreference());
         config.add("m3u_epg_urls", new com.google.gson.Gson().toJsonTree(AppConfig.getM3uEpgUrls()));
@@ -462,6 +496,9 @@ public class ConfigWebServer {
                 "            <div class=\"info\">输入 M3U 播放列表的完整 URL，例如: http://example.com/playlist.m3u</div>\n" +
                 "            <button onclick=\"saveM3uUrl()\">保存 M3U URL</button>\n" +
                 "            <div id=\"m3uStatus\" class=\"status\"></div>\n" +
+                "            <div id=\"m3uFileInfo\" class=\"info\"></div>\n" +
+                "            <button id=\"clearM3uFileBtn\" onclick=\"clearM3uFile()\" style=\"display:none;\">清除本地文件</button>\n" +
+                "            <div id=\"m3uFileStatus\" class=\"status\"></div>\n" +
                 "        </div>\n" +
                 "        \n" +
                 "        <div class=\"section\">\n" +
@@ -546,11 +583,39 @@ public class ConfigWebServer {
                 "                document.getElementById('epgPrefStatus').textContent = '✗ 网络错误: ' + e;\n" +
                 "            });\n" +
                 "        }\n" +
+                "        function clearM3uFile() {\n" +
+                "            fetch('/config/m3u-file-clear', {\n" +
+                "                method: 'POST',\n" +
+                "                headers: {'Content-Type': 'application/x-www-form-urlencoded'},\n" +
+                "                body: 'action=clear'\n" +
+                "            }).then(r => r.json()).then(d => {\n" +
+                "                const status = document.getElementById('m3uFileStatus');\n" +
+                "                if (d.success) {\n" +
+                "                    status.className = 'status success';\n" +
+                "                    status.textContent = '✓ ' + d.message + ' (TV 端将自动重新加载)';\n" +
+                "                    document.getElementById('m3uFileInfo').textContent = '未使用本地文件，使用上方 M3U 地址';\n" +
+                "                    document.getElementById('clearM3uFileBtn').style.display = 'none';\n" +
+                "                } else {\n" +
+                "                    status.className = 'status error';\n" +
+                "                    status.textContent = '✗ ' + d.message;\n" +
+                "                }\n" +
+                "            }).catch(e => {\n" +
+                "                document.getElementById('m3uFileStatus').className = 'status error';\n" +
+                "                document.getElementById('m3uFileStatus').textContent = '✗ 网络错误: ' + e;\n" +
+                "            });\n" +
+                "        }\n" +
                 "        window.onload = function() {\n" +
                 "            fetch('/config/get').then(r => r.json()).then(d => {\n" +
                 "                document.getElementById('m3uUrl').value = d.m3u_url || '';\n" +
                 "                document.getElementById('epgUrl').value = d.epg_url || '';\n" +
                 "                document.getElementById('epgPreference').value = d.epg_preference || 'auto';\n" +
+                "                const m3uFile = d.m3u_file_path || '';\n" +
+                "                if (m3uFile) {\n" +
+                "                    document.getElementById('m3uFileInfo').textContent = '本地 M3U 文件生效: ' + m3uFile;\n" +
+                "                    document.getElementById('clearM3uFileBtn').style.display = 'block';\n" +
+                "                } else {\n" +
+                "                    document.getElementById('m3uFileInfo').textContent = '未使用本地文件，使用上方 M3U 地址';\n" +
+                "                }\n" +
                 "                const m3uUrls = d.m3u_epg_urls || [];\n" +
                 "                document.getElementById('epgM3uInfo').textContent = m3uUrls.length\n" +
                 "                    ? 'M3U 内置 EPG: ' + m3uUrls.join(' | ')\n" +

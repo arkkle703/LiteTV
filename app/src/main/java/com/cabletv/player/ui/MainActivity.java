@@ -43,6 +43,9 @@ public class MainActivity extends Activity {
      * the EpgManager directly.
      */
     private String mLastEpgConfigSignature = "";
+    /** Snapshot of the M3U source settings (URL + local file), compared on resume so edits made
+     *  in the settings screen reload the channels. */
+    private String mLastM3uConfigSignature = "";
     private int mCurrentChannelIndex = 0;
     private long mLastChannelSwitchTime = 0;
     private boolean mChannelListVisible = false;
@@ -92,6 +95,7 @@ public class MainActivity extends Activity {
         mNavigator = new ChannelNavigator();
         mEpgManager = new EpgManager(this);
         mLastEpgConfigSignature = epgConfigSignature();
+        mLastM3uConfigSignature = m3uConfigSignature();
 
         // Create overlay components
         FrameLayout rootView = (FrameLayout) mVideoView.getParent();
@@ -228,6 +232,13 @@ public class MainActivity extends Activity {
                 if (current != null) {
                     mEpgManager.loadEpg(current);
                 }
+            }
+
+            @Override
+            public void onM3uFileChanged(String newPath) {
+                Log.d(TAG, "Local M3U file changed, reloading channels: " + newPath);
+                mLastM3uConfigSignature = m3uConfigSignature();
+                mChannelRepository.reload();
             }
         });
         if (AppConfig.isWebServerEnabled()) {
@@ -558,6 +569,11 @@ public class MainActivity extends Activity {
     /** Identity of the EPG settings the user controls directly (URL + priority). */
     private static String epgConfigSignature() {
         return AppConfig.getEpgUrl() + "\n" + AppConfig.getEpgPreference();
+    }
+
+    /** Identity of the M3U source (URL + local file path). */
+    private static String m3uConfigSignature() {
+        return AppConfig.getM3uUrl() + "\n" + AppConfig.getM3uFilePath();
     }
 
     private void handleChannelUp() {
@@ -958,6 +974,14 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        String m3uSignature = m3uConfigSignature();
+        if (!m3uSignature.equals(mLastM3uConfigSignature)) {
+            mLastM3uConfigSignature = m3uSignature;
+            if (mChannelRepository != null) {
+                Log.d(TAG, "M3U source changed in settings screen, reloading channels");
+                mChannelRepository.reload();
+            }
+        }
         String signature = epgConfigSignature();
         if (!signature.equals(mLastEpgConfigSignature)) {
             mLastEpgConfigSignature = signature;

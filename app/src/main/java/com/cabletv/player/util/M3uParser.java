@@ -203,7 +203,14 @@ public class M3uParser {
                 if (line.isEmpty()) continue;
 
                 if (line.endsWith("#genre#")) {
-                    currentGroupName = line.split(",")[0].trim();
+                    // Accept both the traditional "央视频道,#genre#" and the comma-less
+                    // "央视频道#genre#" a local file may well carry; neither may leak the
+                    // marker into the group name.
+                    String name = line.substring(0, line.length() - "#genre#".length()).trim();
+                    if (name.endsWith(",")) {
+                        name = name.substring(0, name.length() - 1).trim();
+                    }
+                    currentGroupName = name;
                     continue;
                 }
 

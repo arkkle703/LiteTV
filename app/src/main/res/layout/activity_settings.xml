@@ -104,6 +104,53 @@
                     android:padding="12dp"
                     android:focusable="true" />
 
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/local_m3u_file"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:layout_marginTop="16dp" />
+
+                <TextView
+                    android:id="@+id/m3u_file_path_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="8dp" />
+
+                <Button
+                    android:id="@+id/pick_m3u_file_btn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/m3u_file_pick"
+                    android:background="@drawable/button_focus_selector"
+                    android:textColor="@color/text_primary"
+                    android:padding="12dp"
+                    android:focusable="true" />
+
+                <Button
+                    android:id="@+id/clear_m3u_file_btn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/m3u_file_clear"
+                    android:background="@drawable/button_focus_selector"
+                    android:textColor="@color/text_primary"
+                    android:padding="12dp"
+                    android:layout_marginTop="8dp"
+                    android:focusable="true" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/m3u_file_priority_hint"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp"
+                    android:layout_marginTop="8dp" />
+
             </LinearLayout>
 
             <!-- EPG Source Section -->
