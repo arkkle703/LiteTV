@@ -41,12 +41,19 @@ public class SettingsActivity extends Activity {
     private RadioGroup mEpgPreferenceGroup;
     private TextView mEpgM3uEmbeddedText;
     private TextView mM3uFilePathText;
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        ImmersiveMode.onWindowFocusChanged(this, hasFocus);
+    }
+
     /** Error string id of the last failed file copy (0 when none), shown once by onActivityResult. */
     private int mLastFilePickError = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        ImmersiveMode.apply(this);
         setContentView(R.layout.activity_settings);
 
         mM3uUrlInput = findViewById(R.id.m3u_url_input);

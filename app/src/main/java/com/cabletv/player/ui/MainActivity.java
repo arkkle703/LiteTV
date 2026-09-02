@@ -9,7 +9,10 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import android.view.GestureDetector;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
+import android.view.View;
 import android.widget.Button;
 import android.widget.FrameLayout;
 
@@ -36,6 +39,13 @@ public class MainActivity extends Activity {
     private PlaybackInfoComponent mPlaybackInfoComponent;
     private PlaybackStatusView mPlaybackStatusView;
     private ChannelNumberView mChannelNumberView;
+    private TimeShiftBarComponent mTimeShiftBar;
+    private GestureDetector mGestureDetector;
+    private final Runnable mTimeShiftTicker = this::tickTimeShiftBar;
+    /** How far back the live time-shift bar may rewind when no EPG is known. */
+    private static final long TIMESHIFT_NO_EPG_WINDOW_MS = 2 * 60 * 60 * 1000L;
+    /** Dragging to within this of "now" keeps (or returns to) live. */
+    private static final long TIMESHIFT_LIVE_MARGIN_MS = 5 * 1000L;
     private ChannelRepository.OnChannelsChangedListener mChannelsChangedListener;
     /**
      * Snapshot of the EPG settings the in-memory programmes were loaded with. Comparing on
@@ -88,6 +98,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        ImmersiveMode.apply(this);
         setContentView(R.layout.activity_main);
 
         mVideoView = findViewById(R.id.video_view);
@@ -124,10 +135,66 @@ public class MainActivity extends Activity {
         infoBarlp.gravity = android.view.Gravity.BOTTOM;
         mPlaybackInfoComponent.setLayoutParams(infoBarlp);
         rootView.addView(mPlaybackInfoComponent);
+        // On phones the info bar is the doorway to the channel list: tap it to open the menu.
+        mPlaybackInfoComponent.setClickable(true);
+        mPlaybackInfoComponent.setOnClickListener(v -> {
+            if (!mChannelListVisible) {
+                mChannelListVisible = true;
+                showChannelList();
+            }
+        });
 
         // Centred status message for buffering / reconnect / playback failure
         mPlaybackStatusView = new PlaybackStatusView(this);
         rootView.addView(mPlaybackStatusView, mPlaybackStatusView.createCenteredLayoutParams());
+
+        // Draggable time-shift seek bar, floating just above the playback info strip
+        mTimeShiftBar = new TimeShiftBarComponent(this);
+        mTimeShiftBar.setOnSeekListener(new TimeShiftBarComponent.OnSeekListener() {
+            @Override
+            public void onSeekTo(long targetMs) {
+                handleTimeShiftSeek(targetMs);
+            }
+
+            @Override
+            public void onBackToLive() {
+                exitCatchupToLive();
+            }
+        });
+        rootView.addView(mTimeShiftBar, mTimeShiftBar.createBottomLayoutParams());
+
+        // Phone/touch: tap video to show controls, double-tap to cycle sources, long-press
+        // to replay the current programme, vertical fling to change channel, horizontal
+        // fling for LEFT/RIGHT semantics (day paging / catchup seeking).
+        mGestureDetector = new GestureDetector(this,
+                new GestureDetector.SimpleOnGestureListener() {
+                    @Override
+                    public boolean onSingleTapConfirmed(MotionEvent e) {
+                        handleVideoTap();
+                        return true;
+                    }
+
+                    @Override
+                    public boolean onDoubleTap(MotionEvent e) {
+                        handleSourceSwitch();
+                        return true;
+                    }
+
+                    @Override
+                    public void onLongPress(MotionEvent e) {
+                        onOkLongPress();
+                    }
+
+                    @Override
+                    public boolean onFling(MotionEvent e1, MotionEvent e2,
+                                           float velocityX, float velocityY) {
+                        handleVideoFling(Math.abs(velocityX) > Math.abs(velocityY),
+                                velocityX > 0, velocityY < 0);
+                        return true;
+                    }
+                });
+        mGestureDetector.setIsLongpressEnabled(true);
+        rootView.setOnTouchListener((v, event) -> mGestureDetector.onTouchEvent(event));
 
         // Digits typed on the remote, shown while the user is still typing
         mChannelNumberView = new ChannelNumberView(this);
@@ -294,6 +361,9 @@ public class MainActivity extends Activity {
             case BACK:
                 handleBack();
                 return true;
+            case SOURCE_SWITCH:
+                handleSourceSwitch();
+                return true;
             default:
                 int digit = digitFor(action);
                 if (digit >= 0) {
@@ -302,6 +372,208 @@ public class MainActivity extends Activity {
                 }
                 return super.dispatchKeyEvent(event);
         }
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        ImmersiveMode.onWindowFocusChanged(this, hasFocus);
+    }
+
+    /**
+     * Cycles through the channel's own source URLs, the same list the automatic failover
+     * walks on error. A no-op for channels with a single source.
+     */
+    private void handleSourceSwitch() {
+        Channel channel = mChannelRepository.getChannel(mCurrentChannelIndex);
+        if (channel == null || channel.urlCount() < 2) {
+            if (channel != null) {
+                android.widget.Toast.makeText(this, R.string.source_only_one,
+                        android.widget.Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
+        mCurrentUrlIndex = (mCurrentUrlIndex + 1) % channel.urlCount();
+        String url = channel.urlAt(mCurrentUrlIndex);
+        Log.i(TAG, "Manual source switch: " + channel.name + " → source "
+                + (mCurrentUrlIndex + 1) + "/" + channel.urlCount());
+        android.widget.Toast.makeText(this,
+                getString(R.string.source_switched, channel.name,
+                        mCurrentUrlIndex + 1, channel.urlCount()),
+                android.widget.Toast.LENGTH_SHORT).show();
+        if (mChannelListVisible) {
+            hideChannelList();
+            mChannelListVisible = false;
+        }
+        // The new source is a live stream, so leave any 回看 window behind.
+        if (mCatchupActive) {
+            mCatchupActive = false;
+            mCatchupChannel = null;
+            mCatchupProgram = null;
+            mCatchupPlayheadMs = 0;
+        }
+        cancelReconnect();
+        runOnUiThread(() -> {
+            mVideoView.switchUrl(url, channel.headers);
+            mVideoView.start();
+            refreshTimeShiftBar();
+        });
+    }
+
+    /** Tap on the video: toggle the control overlay (or the channel list if it is open). */
+    private void handleVideoTap() {
+        if (mChannelListVisible) {
+            hideChannelList();
+            mChannelListVisible = false;
+            return;
+        }
+        if (mTimeShiftBar.getVisibility() == View.VISIBLE) {
+            mTimeShiftBar.hideSmooth();
+            return;
+        }
+        Channel channel = mChannelRepository.getChannel(mCurrentChannelIndex);
+        if (channel != null && mPlaybackInfoComponent != null) {
+            mPlaybackInfoComponent.showChannelInfo(channel);
+        }
+        refreshTimeShiftBar(true);
+    }
+
+    /**
+     * Fling on the video. Horizontal maps to LEFT/RIGHT (day paging inside the programme
+     * column, catchup seeking full screen); vertical changes channel (or ignores the fling
+     * while the list is open, where the list itself scrolls).
+     */
+    private void handleVideoFling(boolean horizontal, boolean positiveX, boolean upwardY) {
+        if (horizontal) {
+            if (positiveX) {
+                handleFocusRight();
+            } else {
+                handleFocusLeft();
+            }
+            return;
+        }
+        if (mChannelListVisible) {
+            return; // the channel list RecyclerViews own vertical swipes
+        }
+        if (upwardY) {
+            handleChannelUp();
+        } else {
+            handleChannelDown();
+        }
+    }
+
+    /**
+     * Commit a time-shift bar drag. In catchup the window is the replay window itself; in
+     * live playback dragging back enters 回看 at that time, and dropping near "now" stays live.
+     */
+    private void handleTimeShiftSeek(long targetMs) {
+        long now = System.currentTimeMillis();
+        if (mCatchupActive) {
+            seekCatchupTo(targetMs);
+            return;
+        }
+        Channel channel = mChannelRepository.getChannel(mCurrentChannelIndex);
+        if (channel == null || !channel.hasCatchup()) {
+            mTimeShiftBar.hide();
+            return;
+        }
+        if (targetMs >= now - TIMESHIFT_LIVE_MARGIN_MS) {
+            // Let go at the live edge: stay on live TV, nothing to rewind.
+            mTimeShiftBar.setWindow(timeShiftWindowStart(channel), now, now);
+            return;
+        }
+        enterCatchupFromLive(channel, targetMs);
+    }
+
+    /** Rewinds straight from the live bar to the given time (回看 at that moment). */
+    private void enterCatchupFromLive(Channel channel, long targetMs) {
+        long now = System.currentTimeMillis();
+        long end = now + CATCHUP_LIVE_TAIL_MS;
+        EpgManager.Program program = null;
+        if (targetMs >= timeShiftWindowStart(channel)) {
+            EpgManager.Program current = mEpgManager.getCurrentProgram(channel);
+            if (current != null && targetMs >= current.startTime) {
+                program = current;
+                // Past programmes end at their stop time; only still-airing ones keep a tail.
+                end = catchupWindowEnd(program, now);
+            }
+        }
+        if (program == null) {
+            // No EPG: replay a fixed window from the drop point.
+            program = new EpgManager.Program(channel.name, targetMs, end);
+        }
+        startCatchup(channel, targetMs, end, program);
+    }
+
+    /** The left edge of the live time-shift window: today's programme or a fixed lookback. */
+    private long timeShiftWindowStart(Channel channel) {
+        long now = System.currentTimeMillis();
+        EpgManager.Program current = mEpgManager.getCurrentProgram(channel);
+        if (current != null && current.startTime > 0 && current.startTime < now) {
+            return current.startTime;
+        }
+        return now - TIMESHIFT_NO_EPG_WINDOW_MS;
+    }
+
+    /** Keeps the live thumb glued to "now" while the bar is open. */
+    private void tickTimeShiftBar() {
+        if (mTimeShiftBar != null && mTimeShiftBar.getVisibility() == View.VISIBLE) {
+            mTimeShiftBar.tickIfIdle();
+            mMainHandler.postDelayed(mTimeShiftTicker, 1000);
+        }
+    }
+
+    private void startTimeShiftTicker() {
+        mMainHandler.removeCallbacks(mTimeShiftTicker);
+        mMainHandler.postDelayed(mTimeShiftTicker, 1000);
+    }
+
+    /** Repaints the time-shift bar for the current playback position, showing it when useful. */
+    private void refreshTimeShiftBar() {
+        refreshTimeShiftBar(false);
+    }
+
+    /**
+     * @param forceShow live mode only: the bar normally stays hidden until the user taps the
+     *                  video, so it never sits over TV playback uninvited. Catchup always shows
+     *                  it because the drag IS the way to seek a replay.
+     */
+    private void refreshTimeShiftBar(boolean forceShow) {
+        if (mTimeShiftBar == null) {
+            return;
+        }
+        Channel channel = mChannelRepository.getChannel(mCurrentChannelIndex);
+        if (channel == null) {
+            mTimeShiftBar.hide();
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (mCatchupActive && mCatchupProgram != null) {
+            long end = catchupWindowEnd(mCatchupProgram, now);
+            mTimeShiftBar.setChannelLabel(channel.name);
+            mTimeShiftBar.setBackToLiveVisible(true);
+            mTimeShiftBar.setWindow(mCatchupProgram.startTime, end, mCatchupPlayheadMs);
+            mTimeShiftBar.show();
+            startTimeShiftTicker();
+            return;
+        }
+        if (!channel.hasCatchup()) {
+            mTimeShiftBar.hide();
+            return;
+        }
+        // Live: the window runs from the programme start to now.
+        long start = timeShiftWindowStart(channel);
+        mTimeShiftBar.setChannelLabel(channel.name);
+        mTimeShiftBar.setBackToLiveVisible(false);
+        mTimeShiftBar.setWindow(start, now, now);
+        if (forceShow) {
+            mTimeShiftBar.show();
+            startTimeShiftTicker();
+        }
+    }
+
+    private void stopTimeShiftTicker() {
+        mMainHandler.removeCallbacks(mTimeShiftTicker);
     }
 
     /**
@@ -467,6 +739,7 @@ public class MainActivity extends Activity {
         if (mPlaybackInfoComponent != null) {
             mPlaybackInfoComponent.showChannelInfo(channel);
         }
+        refreshTimeShiftBar();
         android.widget.Toast.makeText(this,
                 getString(R.string.catchup_started, program.title),
                 android.widget.Toast.LENGTH_SHORT).show();
@@ -485,9 +758,20 @@ public class MainActivity extends Activity {
             return;
         }
         long now = System.currentTimeMillis();
+        long target = Math.max(mCatchupProgram.startTime,
+                Math.min(now - CATCHUP_SEEK_STEP_MS, mCatchupPlayheadMs + deltaMs));
+        seekCatchupTo(target);
+    }
+
+    /** Seeks the catchup playhead to an absolute position within the programme window. */
+    private void seekCatchupTo(long targetMs) {
+        if (!mCatchupActive || mCatchupChannel == null || mCatchupProgram == null) {
+            return;
+        }
+        long now = System.currentTimeMillis();
         long minPlayhead = mCatchupProgram.startTime;
         long maxPlayhead = now - CATCHUP_SEEK_STEP_MS;
-        long target = Math.max(minPlayhead, Math.min(mCatchupPlayheadMs + deltaMs, maxPlayhead));
+        long target = Math.max(minPlayhead, Math.min(targetMs, maxPlayhead));
         if (target == mCatchupPlayheadMs) {
             return;
         }
@@ -498,7 +782,10 @@ public class MainActivity extends Activity {
             return;
         }
         Log.i(TAG, "Catchup seek to +" + ((mCatchupPlayheadMs - mCatchupProgram.startTime) / 1000) + "s");
-        runOnUiThread(() -> mVideoView.switchUrl(url, mCatchupChannel.headers));
+        runOnUiThread(() -> {
+            mVideoView.switchUrl(url, mCatchupChannel.headers);
+            refreshTimeShiftBar();
+        });
         showCatchupSeekIndicator((mCatchupPlayheadMs - mCatchupProgram.startTime) / 1000);
     }
 
@@ -780,6 +1067,22 @@ public class MainActivity extends Activity {
             mChannelListComponent.setOnChannelSelectedListener((index, channel) -> {
                 mCurrentChannelIndex = index;
                 playChannel(index);
+                // A row tap is a direct command: close the list, tune and play.
+                if (mChannelListVisible) {
+                    hideChannelList();
+                    mChannelListVisible = false;
+                }
+            });
+            // Tapping a programme row replays it (回看), the way long-pressing OK does.
+            mChannelListComponent.setOnProgramClickListener((channel, program) -> {
+                if (channel == null || program == null || !channel.hasCatchup()) {
+                    android.widget.Toast.makeText(this, R.string.catchup_not_available,
+                            android.widget.Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                mCurrentChannelIndex = mChannelListComponent.getSelectedChannelIndex();
+                mNavigator.setCurrentGroupIndex(mChannelListComponent.getBrowsedGroupIndex());
+                playCatchup(channel, program);
             });
 
             // Add to VideoView's parent or create appropriate params
@@ -877,17 +1180,17 @@ public class MainActivity extends Activity {
             final String url = channel.url();
             Log.d(TAG, "Playing channel: " + channel.name + " - " + url
                     + " (" + channel.urlCount() + " source(s))");
-            // Ensure UI operations happen on main thread
+            // Show bottom playback info bar
             runOnUiThread(() -> {
                 mVideoView.switchUrl(url, channel.headers);
                 mVideoView.start();
                 if (mChannelListComponent != null) {
                     mChannelListComponent.setCurrentChannel(index);
                 }
-                // Show bottom playback info bar
                 if (mPlaybackInfoComponent != null) {
                     mPlaybackInfoComponent.showChannelInfo(channel);
                 }
+                refreshTimeShiftBar();
             });
             // Save current channel for resume on next app startup
             AppConfig.setLastChannelUrl(url);
@@ -1039,6 +1342,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        stopTimeShiftTicker();
         // Leaving mid-press must not turn into a favourite once we are no longer on screen
         mMainHandler.removeCallbacks(mOkLongPressRunnable);
         if (mVideoView != null) {
@@ -1052,6 +1356,7 @@ public class MainActivity extends Activity {
         mMainHandler.removeCallbacks(mReconnectRunnable);
         mMainHandler.removeCallbacks(mNumberCommitRunnable);
         mMainHandler.removeCallbacks(mOkLongPressRunnable);
+        stopTimeShiftTicker();
         // The web server keeps its listener in a static field; leaving ours there would leak
         // this Activity for the whole process lifetime.
         ConfigWebServer.setConfigChangeListener(null);

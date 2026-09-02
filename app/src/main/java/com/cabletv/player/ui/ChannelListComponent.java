@@ -69,6 +69,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
     /** Day offsets (within the window) that the selected channel actually has data for. */
     private java.util.List<Integer> mAvailableDayOffsets = new ArrayList<>();
     private OnChannelSelectedListener mSelectionListener;
+    private OnProgramClickListener mProgramClickListener;
     private EpgManager mEpgManager;
     private boolean mProgramListVisible = false;
     private static final String TAG = "ChannelListComponent";
@@ -86,6 +87,11 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         void onChannelSelected(int index, Channel channel);
     }
 
+    /** Fired when the user taps a programme row (回看). */
+    public interface OnProgramClickListener {
+        void onProgramClick(Channel channel, EpgManager.Program program);
+    }
+
     public ChannelListComponent(@NonNull Context context, ChannelNavigator navigator) {
         super(context);
         mNavigator = navigator;
@@ -94,6 +100,9 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         mGroupRecyclerView.setAdapter(mGroupAdapter);
         mAdapter = new ChannelListAdapter(context, navigator);
         mRecyclerView.setAdapter(mAdapter);
+        // Touch: tapping a row acts like the D-pad cursor + OK on that row.
+        mGroupAdapter.setRowClickListener(this::onGroupRowTap);
+        mAdapter.setRowClickListener(this::onChannelRowTap);
     }
 
     private void initView(Context context) {
@@ -252,6 +261,45 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         mSelectionListener = listener;
     }
 
+    public void setOnProgramClickListener(OnProgramClickListener listener) {
+        mProgramClickListener = listener;
+    }
+
+    /** Touch tap on a group row: open that group, the way OK does on the groups column. */
+    private void onGroupRowTap(int position) {
+        if (position < 0 || position >= mNavigator.groupCount()) {
+            return;
+        }
+        showGroup(position, mSelectedChannelIndex);
+        moveFocusToChannels();
+    }
+
+    /** Touch tap on a channel row: select and play it straight away. */
+    private void onChannelRowTap(int position) {
+        selectPosition(position);
+        confirmSelection();
+    }
+
+    /** Touch tap on a programme row: replay it, the way OK does on the programmes column. */
+    private void onProgramRowTap(int position) {
+        RecyclerView.Adapter<?> adapter = mProgramRecyclerView.getAdapter();
+        if (!(adapter instanceof ProgramListAdapter)) {
+            return;
+        }
+        ProgramListAdapter programAdapter = (ProgramListAdapter) adapter;
+        if (position < 0 || position >= programAdapter.getItemCount()) {
+            return;
+        }
+        // Keep the row highlight in sync with what is about to be replayed, then fire the
+        // callback so MainActivity can start the catchup stream.
+        mSelectedProgramIndex = position;
+        programAdapter.setSelectedIndex(position);
+        if (mProgramClickListener != null) {
+            mProgramClickListener.onProgramClick(getSelectedChannel(),
+                    programAdapter.getProgram(position));
+        }
+    }
+
     /** Rebuilds both columns after the playlist changed. */
     public void refreshChannels(int currentChannelIndex) {
         mCurrentChannelIndex = currentChannelIndex;
@@ -380,6 +428,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         }
         List<EpgManager.Program> dayPrograms = filterProgramsForDay(programs, mDayOffset);
         ProgramListAdapter programAdapter = new ProgramListAdapter(getContext(), dayPrograms);
+        programAdapter.setRowClickListener(this::onProgramRowTap);
         mProgramRecyclerView.setAdapter(programAdapter);
         mProgramListContainer.setVisibility(VISIBLE);
         mProgramListVisible = true;
@@ -718,15 +767,25 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
     }
 
     // Adapter for the group column
+    /** Touch row tap callback: receives the adapter row position that was tapped. */
+    interface RowClickCallback {
+        void onRowClick(int position);
+    }
+
     public static class GroupListAdapter extends RecyclerView.Adapter<GroupListAdapter.GroupViewHolder> {
         private final Context mContext;
         private final ChannelNavigator mNavigator;
         private int mSelectedIndex = ChannelNavigator.FAVORITES_GROUP;
         private boolean mFocused = false;
+        private RowClickCallback mRowClickCallback;
 
         GroupListAdapter(Context context, ChannelNavigator navigator) {
             mContext = context;
             mNavigator = navigator;
+        }
+
+        void setRowClickListener(RowClickCallback callback) {
+            mRowClickCallback = callback;
         }
 
         void setSelectedGroup(int index) {
@@ -765,6 +824,11 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
             }
             holder.setGroup(groupLabel(mContext, group), group.channels.size(),
                     position == mSelectedIndex, mFocused);
+            holder.itemView.setOnClickListener(v -> {
+                if (mRowClickCallback != null) {
+                    mRowClickCallback.onRowClick(position);
+                }
+            });
         }
 
         @Override
@@ -814,10 +878,15 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         private int mSelectedIndex = 0;
         private boolean mFocusOnChannels = true;
         private EpgManager mEpgManager;
+        private RowClickCallback mRowClickCallback;
 
         public ChannelListAdapter(Context context, ChannelNavigator navigator) {
             mContext = context;
             mNavigator = navigator;
+        }
+
+        public void setRowClickListener(RowClickCallback callback) {
+            mRowClickCallback = callback;
         }
 
         public void setEpgManager(EpgManager epgManager) {
@@ -881,6 +950,11 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
             holder.setChannel(channel, number, position == mSelectedIndex, position == mCurrentIndex,
                     mEpgManager, mFocusOnChannels,
                     mNavigator != null && mNavigator.isFavorite(channel));
+            holder.itemView.setOnClickListener(v -> {
+                if (mRowClickCallback != null) {
+                    mRowClickCallback.onRowClick(position);
+                }
+            });
         }
 
         @Override
@@ -1052,10 +1126,15 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         private final List<EpgManager.Program> mPrograms;
         private int mSelectedIndex = -1;
         private boolean mFocused = false;
+        private RowClickCallback mRowClickCallback;
 
         public ProgramListAdapter(Context context, List<EpgManager.Program> programs) {
             mContext = context;
             mPrograms = new ArrayList<>(programs);
+        }
+
+        void setRowClickListener(RowClickCallback callback) {
+            mRowClickCallback = callback;
         }
 
         public void setSelectedIndex(int index) {
@@ -1093,6 +1172,11 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         public void onBindViewHolder(@NonNull ProgramViewHolder holder, int position) {
             EpgManager.Program program = mPrograms.get(position);
             holder.setProgram(program, position == mSelectedIndex, mFocused);
+            holder.itemView.setOnClickListener(v -> {
+                if (mRowClickCallback != null) {
+                    mRowClickCallback.onRowClick(position);
+                }
+            });
         }
 
         @Override
