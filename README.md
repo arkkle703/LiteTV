@@ -3,24 +3,25 @@
 [![GitHub Release](https://img.shields.io/github/v/release/vibe4free/LiteTV?label=Latest%20Release)](https://github.com/vibe4free/LiteTV/releases)
 ![Platform](https://img.shields.io/badge/Platform-Android%20TV%205.1%2B%20(API%2021%2B)-4CAF50)
 ![Player](https://img.shields.io/badge/Player-Media3%201.4.1-orange)
-![APK](https://img.shields.io/badge/APK-~9%20MB-lightgrey)
+![APK](https://img.shields.io/badge/APK-~3.3%20MB%2FABI-lightgrey)
 ![minSdk](https://img.shields.io/badge/minSdk-21-blue)
 
 > GitHub 仓库：[github.com/vibe4free/LiteTV](https://github.com/vibe4free/LiteTV)
 
-一款为 Android TV 遥控器深度优化的**通用 IPTV 直播播放器（空壳应用）**。自身不含任何直播源，配置你的 M3U 直播源地址后即可使用；支持 **EPG 电子节目单**、**频道分组与收藏**、**内置 Web 远程配置服务器**。
+一款为 Android TV 遥控器深度优化、并支持手机触屏的**通用 IPTV 直播播放器（空壳应用）**。自身不含任何直播源，配置你的 M3U 直播源地址后即可使用；支持 **EPG 电子节目单**、**回看（时移）**、**频道分组与收藏**、**本地 M3U 文件导入**、**内置 Web 远程配置服务器**。
 
-> 轻量设计：仅 Media3 (ExoPlayer) + HTTP，无 ijkplayer、无 P2P、无广告，APK 约 9 MB。
+> 轻量设计：仅 Media3 (ExoPlayer) + HTTP，无 ijkplayer、无 P2P、无广告，按 ABI 拆分后约 3.3 MB / 个。
 
 ---
 
 ## ✨ 功能简介
 
 ### 核心定位
-- **通用 IPTV 播放器（空壳）**：配置直播源后使用，支持 M3U / TXT 播放列表
-- **支持 EPG 电子节目单**：XMLTV（含 gzip/zip 压缩）、DIYP JSON 多格式
+- **通用 IPTV 播放器（空壳）**：配置直播源后使用，支持 M3U / TXT 播放列表（网络地址或本地文件）
+- **支持 EPG 电子节目单**：XMLTV（含 gzip/zip 压缩）、DIYP JSON 多格式，M3U 内置 EPG 自动识别
+- **支持回看（时移）**：识别播放列表中 `catchup` 属性，可从节目单直接回看过去的节目
 
-### 🎮 遥控器专属交互
+### 🎮 遥控器操作
 | 按键 | 功能 |
 |------|------|
 | D-Pad **UP / DOWN** | 切换频道（频道列表打开时导航分组/频道/节目列表） |
@@ -30,16 +31,26 @@
 | 数字键 **0-9** | 数字直达频道（2 秒输入窗口 + 顶部名称提示） |
 | **音量键 ±** | 音量减 / 加 |
 | **MENU** | 打开设置界面 |
-| **BACK** | 隐藏列表 / 取消数字输入 / 回看中返回直播 / 退出 |
+| **BACK** | 隐藏列表 / 取消数字输入 / 回看中返回直播 / 退出（弹确认框） |
+
+### 📱 手机 / 触屏操作
+- **沉浸式全屏**：自动隐藏状态栏与导航栏（播放页与设置页）
+- 点按画面：呼出 / 收起控制条（底部信息条 + 时移条）；列表已打开时则收起列表
+- 点按底部信息条：打开频道列表
+- 上下滑动：切换频道；左右滑动：等同 LEFT/RIGHT（直播进入回看 / 回看快进快退 / 节目栏翻日）
+- 双击画面：切换播放源（源 1/2/…）；长按画面：回看当前节目
+- 频道列表三栏的行均可直接点击（分组 → 进入分组，频道 → 播放，节目 → 回看）
 
 ### 📺 播放体验
 - **画面输出默认 SurfaceView**：视频走硬件视频层（含硬件去隔行/缩放），1080i 直播不再出现锯齿/模糊；部分设备异常时可在设置切回 TextureView
 - **缓冲策略**：1.5s 起播（换台快）+ 12s 缓冲余量 + 1.5s 抗抖动恢复阈值
 - **帧率匹配**：Android 11+ 上请求电视刷新率跟随片源，减少抖动
 - **解码方式可选**：自动 / 仅硬件 / 优先软件（个别频道硬解不支持时用软解兜底）
-- **无缝频道切换**：重用播放器实例（`switchUrl`），切换不重建连接，低延迟缓冲（1s/3s）
+- **无缝频道切换**：重用播放器实例（`switchUrl`），切换不重建连接
+- **手动切换源**：一个频道有多个地址时，双击画面或按 **R** 键切到下一个源（与自动 failover 共用同一源列表）
+- **可拖动时移条**：点按画面呼出，直播中拖动即进入回看；回看中拖动定位，并可一键「回到直播」
 - **断流自动重连**：指数退避重试（1/2/4/8/15s），带播放状态提示与最终失败提示
-- **多源 Failover**：一个频道多个地址（`url1#url2`）逐个尝试，失败自动切换
+- **多源 Failover**：一个频道多个地址（M3U 多条地址行，或 TXT 的 `url1#url2`）逐个尝试，失败自动切换
 - **每频道自定义请求头**：支持 `http-user-agent`、`http-referrer`、`#EXTVLCOPT`、`url|User-Agent=...&Referer=...` 后缀
 - **重启恢复**：自动续播上次观看的频道
 
@@ -58,6 +69,7 @@
 - **节目展示**：当前节目 / 下一个节目、实时进度条、频道列表内嵌节目表
 - **7 天滚动节目单**：缓存保留最近 7 天（含次日），节目栏 **LEFT/RIGHT** 按日期翻页
   （今日 / 昨日 / 具体日期标题），选中过去日期的节目即可回看
+  - 说明：EPG 源（51zmt / 112114 等）只提供“今 + 明日”，历史天数随每天抓取逐步积累（与 TiviMate 一致）
 - **安全加固**：禁用外部实体解析（XXE 防护）
 - **M3U 内置 EPG**：自动识别播放列表头部的 `x-tvg-url` / `tvg-url` / `url-tvg` 属性
   （TiviMate / IPTVnator / Kodi 等通用约定，支持空格或 `|` 分隔的多个后备地址，仅接受 http/https）
@@ -68,23 +80,23 @@
   （TiviMate / IPTV Smarters / rtp2httpd 等通用约定），支持 `default` / `append` 两种模式
 - 时间占位符：`${(b)yyyyMMddHHmmss}` / `${(e)yyyyMMddHHmmss}`（本地时间）、
   `${utc}` / `${utcend}`（Unix 秒）、`${start:格式}` / `${end:格式}`、`${timestamp}`、`{duration}` 等
-- **全屏长按 OK** 回看当前节目；**频道列表节目栏长按 OK** 回看选中节目
-- 回看中 **LEFT/RIGHT** 快退 / 快进（10 秒步进，重建时移窗口），**BACK** 返回直播，播完 / 出错自动回到直播
+- 触发方式：**直播中按 LEFT** 从当前节目开头回看（无 EPG 时回退 2 分钟）；**节目栏短按 / 长按 OK** 回看选中节目；**全屏长按 OK** 回看当前节目
+- 回看中 **LEFT/RIGHT** 快退 / 快进（10 秒步进，重建时移窗口），也可拖动时移条定位；**BACK** 或「回到直播」按钮返回直播，播完 / 出错自动回到直播
 - 仅接受 http/https 回看地址，安全解析
 
 ### 🌐 内置 Web 配置服务器（局域网远程配置）
 - Socket HTTP 服务器，零外部依赖，默认端口 **8899**
 - 浏览器打开 `http://电视IP:8899` 即可可视化配置
-- 与电视端设置页**可配置项一致**：M3U 地址 / 本地文件（查看与移除）/ EPG 地址 / EPG 来源优先级 / EPG 显示开关 / 菜单透明度 / 画面输出方式 / 解码方式 / 视频直通
+- 与电视端设置页**可配置项一致**：M3U 地址 / 本地文件（上传或移除）/ EPG 地址 / EPG 来源优先级 / EPG 显示开关 / 菜单透明度 / 画面输出方式 / 解码方式 / 视频直通
+  （本地文件只能上传或移除，不能浏览电视文件系统；Web 服务器端口不可在页面内修改）
 - REST 接口：`GET /config/get`、`POST /config/m3u-url`、`POST /config/epg-url`、`POST /config/epg-preference`、`POST /config/m3u-file-clear`、`POST /config/m3u-file-upload`（multipart 上传 M3U）、`POST /config/playback`、`POST /config/display`
 - 安全加固：跨站请求防护（Origin 校验）、请求体上限、超时、有界线程池
 
 ### ⚙️ 设置项
 - M3U 直播源地址、**本地 M3U 文件导入（U 盘 / 内部存储）**、EPG 地址、EPG 来源优先级（自动 / 优先 M3U 内置 / 仅用户配置）
 - **播放设置**（需重启应用生效）：画面输出（SurfaceView 推荐 / TextureView 兼容备用）、解码方式（自动 / 仅硬件 / 优先软件解码）、视频直通显示（实验）
-- Web 服务器开关与端口
-- 频道上下键交换（节目列表）、EPG 显示开关
-- 菜单栏透明度（淡 / 中 / 实心）
+- Web 服务器开关（端口固定 8899，设置页会显示本机访问地址）
+- EPG 显示开关、菜单栏透明度（淡 / 中 / 实心）
 - 配置通过 Hawk（加密）持久化
 
 ---
@@ -102,7 +114,7 @@
 ![频道分组](screenshot/Channel_list_g.png)
 
 ### 配置界面
-M3U / EPG 地址配置与 Web 服务器信息（MENU 键打开）：
+设置页（MENU 键打开）：
 
 ![配置界面](screenshot/config.png)
 
@@ -137,9 +149,9 @@ adb install -r LiteTV-vX.Y.Z.apk
    ```
 2. **按 MENU 打开设置**，填入 M3U 地址并保存（例如 `http://example.com/playlist.m3u`）
    > 也可以把 `.m3u` 文件放到 U 盘上，在设置中点「选择 M3U 文件」直接导入本地文件
-3. **可选**：填入 EPG 地址（XMLTV 或 DIYP JSON，如 `http://epg.example.com/e.xml.gz`）
+3. **可选**：填入 EPG 地址（XMLTV 或 DIYP JSON，如 `http://epg.example.com/e.xml.gz`）；如果播放列表头部自带 `x-tvg-url`，不填也会自动使用
 4. **返回播放界面**，频道自动加载并开始播放第一个频道
-5. 按 **OK** 打开频道列表，**UP/DOWN** 换台，**数字键**直达频道
+5. 按 **OK** 打开频道列表，**UP/DOWN** 换台，**数字键**直达频道；有回看的频道直接按 **LEFT** 即可时移回看
 
 > 也可以直接用手机/电脑浏览器访问 `http://电视IP:8899` 完成上述配置。
 
