@@ -7,6 +7,8 @@ import android.util.Log;
 import com.cabletv.player.config.AppConfig;
 import com.google.gson.JsonObject;
 
+import xyz.doikki.videoplayer.player.VideoViewConfig;
+
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
@@ -242,6 +244,12 @@ public class ConfigWebServer {
             } else if ("POST".equals(method) && "/config/m3u-file-clear".equals(path)) {
                 response = handleM3uFileClear();
                 contentType = "application/json";
+            } else if ("POST".equals(method) && "/config/playback".equals(path)) {
+                response = handlePlaybackPost(body);
+                contentType = "application/json";
+            } else if ("POST".equals(method) && "/config/display".equals(path)) {
+                response = handleDisplayPost(body);
+                contentType = "application/json";
             } else {
                 sendResponse(socket, "404 Not Found", 404, "text/plain");
                 return;
@@ -452,7 +460,117 @@ public class ConfigWebServer {
         List<String> active = AppConfig.resolveEpgUrls();
         config.addProperty("active_epg_url", active.isEmpty() ? "" : active.get(0));
         config.addProperty("web_server_enabled", AppConfig.isWebServerEnabled());
+        // Display and playback preferences, so the web page and the TV settings screen expose the
+        // same configuration instead of each covering half of it.
+        config.addProperty("epg_display_enabled", AppConfig.isEpgDisplayEnabled());
+        config.addProperty("sidebar_opacity", AppConfig.getSidebarOpacity());
+        config.addProperty("video_render_mode",
+                AppConfig.getVideoRenderMode() == AppConfig.RENDER_TEXTURE ? "texture" : "surface");
+        config.addProperty("video_decode_mode", decodeModeName(AppConfig.getVideoDecodeMode()));
+        config.addProperty("video_tunneling", AppConfig.isTunnelingEnabled());
         return config.toString();
+    }
+
+    private static String decodeModeName(int mode) {
+        switch (mode) {
+            case VideoViewConfig.DECODE_HARDWARE:
+                return "hardware";
+            case VideoViewConfig.DECODE_SOFTWARE:
+                return "software";
+            default:
+                return "auto";
+        }
+    }
+
+    /**
+     * Saves the playback preferences. Every provided field must be valid, otherwise nothing is
+     * written — a half-applied change would be harder to notice than a rejection. These take
+     * effect on the next launch (the player reads its config once per process), which the page
+     * tells the user.
+     */
+    private static String handlePlaybackPost(String body) {
+        try {
+            Map<String, String> params = parseFormData(body);
+            String render = params.get("video_render_mode");
+            String decode = params.get("video_decode_mode");
+            String tunneling = params.get("video_tunneling");
+            if (!isValidRenderMode(render) || !isValidDecodeMode(decode) || !isValidFlag(tunneling)) {
+                return jsonResult(false, "Invalid playback setting");
+            }
+            if (render != null) {
+                AppConfig.setVideoRenderMode("texture".equals(render)
+                        ? AppConfig.RENDER_TEXTURE : AppConfig.RENDER_SURFACE);
+            }
+            if (decode != null) {
+                AppConfig.setVideoDecodeMode(decodeModeOf(decode));
+            }
+            if (tunneling != null) {
+                AppConfig.setTunnelingEnabled("1".equals(tunneling));
+            }
+            return jsonResult(true, "Playback settings saved (restart the app to apply)");
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving playback settings", e);
+            return jsonResult(false, "Failed to save playback settings");
+        }
+    }
+
+    /** Saves the display preferences; both are applied the next time the channel list opens. */
+    private static String handleDisplayPost(String body) {
+        try {
+            Map<String, String> params = parseFormData(body);
+            String epgDisplay = params.get("epg_display_enabled");
+            String opacity = params.get("sidebar_opacity");
+            if (!isValidFlag(epgDisplay) || !isValidOpacity(opacity)) {
+                return jsonResult(false, "Invalid display setting");
+            }
+            if (epgDisplay != null) {
+                AppConfig.setEpgDisplayEnabled("1".equals(epgDisplay));
+            }
+            if (opacity != null) {
+                AppConfig.setSidebarOpacity(Integer.parseInt(opacity));
+            }
+            return jsonResult(true, "Display settings saved");
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving display settings", e);
+            return jsonResult(false, "Failed to save display settings");
+        }
+    }
+
+    private static boolean isValidRenderMode(String value) {
+        return value == null || "surface".equals(value) || "texture".equals(value);
+    }
+
+    private static boolean isValidDecodeMode(String value) {
+        return value == null || "auto".equals(value) || "hardware".equals(value)
+                || "software".equals(value);
+    }
+
+    private static int decodeModeOf(String value) {
+        if ("hardware".equals(value)) {
+            return VideoViewConfig.DECODE_HARDWARE;
+        }
+        if ("software".equals(value)) {
+            return VideoViewConfig.DECODE_SOFTWARE;
+        }
+        return VideoViewConfig.DECODE_AUTO;
+    }
+
+    private static boolean isValidFlag(String value) {
+        return value == null || "0".equals(value) || "1".equals(value);
+    }
+
+    private static boolean isValidOpacity(String value) {
+        if (value == null) {
+            return true;
+        }
+        return "0".equals(value) || "1".equals(value) || "2".equals(value);
+    }
+
+    private static String jsonResult(boolean success, String message) {
+        JsonObject json = new JsonObject();
+        json.addProperty("success", success);
+        json.addProperty("message", message);
+        return json.toString();
     }
 
     private static Map<String, String> parseFormData(String body) {
@@ -528,6 +646,38 @@ public class ConfigWebServer {
                 "            <div id=\"epgPrefStatus\" class=\"status\"></div>\n" +
                 "            <div id=\"epgM3uInfo\" class=\"info\"></div>\n" +
                 "            <div id=\"epgActiveInfo\" class=\"info\"></div>\n" +
+                "        </div>\n" +
+                "        \n" +
+                "        <div class=\"section\">\n" +
+                "            <h2>播放与显示</h2>\n" +
+                "            <label for=\"videoRenderMode\">画面输出方式:</label>\n" +
+                "            <select id=\"videoRenderMode\" style=\"width:100%;padding:10px;margin-bottom:8px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;\">\n" +
+                "                <option value=\"surface\">SurfaceView（推荐，画面更清晰）</option>\n" +
+                "                <option value=\"texture\">TextureView（兼容备用）</option>\n" +
+                "            </select>\n" +
+                "            <label for=\"videoDecodeMode\">解码方式:</label>\n" +
+                "            <select id=\"videoDecodeMode\" style=\"width:100%;padding:10px;margin-bottom:8px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;\">\n" +
+                "                <option value=\"auto\">自动（优先硬件，失败回退软件）</option>\n" +
+                "                <option value=\"hardware\">仅硬件解码</option>\n" +
+                "                <option value=\"software\">优先软件解码（可解决个别频道打不开）</option>\n" +
+                "            </select>\n" +
+                "            <label style=\"display:flex;align-items:center;gap:8px;margin-bottom:12px;\">\n" +
+                "                <input type=\"checkbox\" id=\"videoTunneling\"> 视频直通显示（实验，部分电视画面更流畅）\n" +
+                "            </label>\n" +
+                "            <label for=\"epgDisplay\">频道列表显示节目单:</label>\n" +
+                "            <select id=\"epgDisplay\" style=\"width:100%;padding:10px;margin-bottom:8px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;\">\n" +
+                "                <option value=\"1\">显示</option>\n" +
+                "                <option value=\"0\">不显示</option>\n" +
+                "            </select>\n" +
+                "            <label for=\"sidebarOpacity\">频道列表背景:</label>\n" +
+                "            <select id=\"sidebarOpacity\" style=\"width:100%;padding:10px;margin-bottom:12px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;\">\n" +
+                "                <option value=\"0\">半透明（默认）</option>\n" +
+                "                <option value=\"1\">半不透明</option>\n" +
+                "                <option value=\"2\">不透明</option>\n" +
+                "            </select>\n" +
+                "            <button onclick=\"savePlayback()\">保存播放设置</button>\n" +
+                "            <div id=\"playbackStatus\" class=\"status\"></div>\n" +
+                "            <div class=\"info\">播放设置需重启电视端应用后生效；显示设置下次打开频道列表时生效。</div>\n" +
                 "        </div>\n" +
                 "    </div>\n" +
                 "    <script>\n" +
@@ -614,11 +764,35 @@ public class ConfigWebServer {
                 "                document.getElementById('m3uFileStatus').textContent = '✗ 网络错误: ' + e;\n" +
                 "            });\n" +
                 "        }\n" +
+                "        function savePlayback() {\n" +
+                "            const body = 'video_render_mode=' + encodeURIComponent(document.getElementById('videoRenderMode').value)\n" +
+                "                + '&video_decode_mode=' + encodeURIComponent(document.getElementById('videoDecodeMode').value)\n" +
+                "                + '&video_tunneling=' + (document.getElementById('videoTunneling').checked ? '1' : '0')\n" +
+                "                + '&epg_display_enabled=' + encodeURIComponent(document.getElementById('epgDisplay').value)\n" +
+                "                + '&sidebar_opacity=' + encodeURIComponent(document.getElementById('sidebarOpacity').value);\n" +
+                "            Promise.all([\n" +
+                "                fetch('/config/playback', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body}),\n" +
+                "                fetch('/config/display', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body})\n" +
+                "            ]).then(rs => Promise.all(rs.map(r => r.json()))).then(ds => {\n" +
+                "                const status = document.getElementById('playbackStatus');\n" +
+                "                const ok = ds.every(d => d.success);\n" +
+                "                status.className = 'status ' + (ok ? 'success' : 'error');\n" +
+                "                status.textContent = ok ? '✓ ' + ds[0].message : '✗ ' + (ds.find(d => !d.success) || {}).message;\n" +
+                "            }).catch(e => {\n" +
+                "                document.getElementById('playbackStatus').className = 'status error';\n" +
+                "                document.getElementById('playbackStatus').textContent = '✗ 网络错误: ' + e;\n" +
+                "            });\n" +
+                "        }\n" +
                 "        window.onload = function() {\n" +
                 "            fetch('/config/get').then(r => r.json()).then(d => {\n" +
                 "                document.getElementById('m3uUrl').value = d.m3u_url || '';\n" +
                 "                document.getElementById('epgUrl').value = d.epg_url || '';\n" +
                 "                document.getElementById('epgPreference').value = d.epg_preference || 'auto';\n" +
+                "                document.getElementById('videoRenderMode').value = d.video_render_mode || 'surface';\n" +
+                "                document.getElementById('videoDecodeMode').value = d.video_decode_mode || 'auto';\n" +
+                "                document.getElementById('videoTunneling').checked = !!d.video_tunneling;\n" +
+                "                document.getElementById('epgDisplay').value = d.epg_display_enabled === false ? '0' : '1';\n" +
+                "                document.getElementById('sidebarOpacity').value = String(d.sidebar_opacity == null ? 0 : d.sidebar_opacity);\n" +
                 "                const m3uFile = d.m3u_file_path || '';\n" +
                 "                const dropDir = d.m3u_drop_dir || '';\n" +
                 "                if (dropDir) {\n" +

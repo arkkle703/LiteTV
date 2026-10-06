@@ -75,7 +75,8 @@
 ### 🌐 内置 Web 配置服务器（局域网远程配置）
 - Socket HTTP 服务器，零外部依赖，默认端口 **8899**
 - 浏览器打开 `http://电视IP:8899` 即可可视化配置
-- REST 接口：`GET /config/get`、`POST /config/m3u-url`、`POST /config/epg-url`、`POST /config/epg-preference`
+- 与电视端设置页**可配置项一致**：M3U 地址 / 本地文件（查看与移除）/ EPG 地址 / EPG 来源优先级 / EPG 显示开关 / 菜单透明度 / 画面输出方式 / 解码方式 / 视频直通
+- REST 接口：`GET /config/get`、`POST /config/m3u-url`、`POST /config/epg-url`、`POST /config/epg-preference`、`POST /config/m3u-file-clear`、`POST /config/playback`、`POST /config/display`
 - 安全加固：跨站请求防护（Origin 校验）、请求体上限、超时、有界线程池
 
 ### ⚙️ 设置项

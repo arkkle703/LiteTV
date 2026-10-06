@@ -114,6 +114,58 @@ public class ConfigWebServerTest {
     // ---- /config/get ----
 
     @Test
+    public void playbackPost_savesValidSettingsAndReportsThemBack() throws Exception {
+        String[] res = request("POST", "/config/playback",
+                "Content-Type: application/x-www-form-urlencoded\r\n",
+                "video_render_mode=texture&video_decode_mode=software&video_tunneling=1");
+        assertEquals("200", res[0]);
+        assertTrue("must report success, got " + res[1], res[1].contains("\"success\":true"));
+        assertEquals(AppConfig.RENDER_TEXTURE, AppConfig.getVideoRenderMode());
+        assertEquals(xyz.doikki.videoplayer.player.VideoViewConfig.DECODE_SOFTWARE,
+                AppConfig.getVideoDecodeMode());
+        assertTrue(AppConfig.isTunnelingEnabled());
+
+        String[] config = request("GET", "/config/get", null, null);
+        assertTrue("the page must be able to read them back: " + config[1],
+                config[1].contains("\"video_render_mode\":\"texture\""));
+        assertTrue(config[1].contains("\"video_decode_mode\":\"software\""));
+        assertTrue(config[1].contains("\"video_tunneling\":true"));
+    }
+
+    @Test
+    public void playbackPost_rejectsAnInvalidValueWithoutWritingAnything() throws Exception {
+        AppConfig.setVideoRenderMode(AppConfig.RENDER_SURFACE);
+        String[] res = request("POST", "/config/playback",
+                "Content-Type: application/x-www-form-urlencoded\r\n",
+                "video_render_mode=texture&video_decode_mode=quantum");
+        assertEquals("200", res[0]);
+        assertTrue("invalid input must be rejected: " + res[1], res[1].contains("\"success\":false"));
+        assertEquals("a partial write would be worse than a rejection", AppConfig.RENDER_SURFACE,
+                AppConfig.getVideoRenderMode());
+    }
+
+    @Test
+    public void displayPost_savesEpgToggleAndOpacity() throws Exception {
+        String[] res = request("POST", "/config/display",
+                "Content-Type: application/x-www-form-urlencoded\r\n",
+                "epg_display_enabled=0&sidebar_opacity=2");
+        assertEquals("200", res[0]);
+        assertTrue(res[1].contains("\"success\":true"));
+        assertTrue(!AppConfig.isEpgDisplayEnabled());
+        assertEquals(AppConfig.SIDEBAR_OPAQUE, AppConfig.getSidebarOpacity());
+    }
+
+    @Test
+    public void displayPost_rejectsOutOfRangeOpacity() throws Exception {
+        AppConfig.setSidebarOpacity(AppConfig.SIDEBAR_TRANSLUCENT);
+        String[] res = request("POST", "/config/display",
+                "Content-Type: application/x-www-form-urlencoded\r\n",
+                "sidebar_opacity=9");
+        assertTrue(res[1].contains("\"success\":false"));
+        assertEquals(AppConfig.SIDEBAR_TRANSLUCENT, AppConfig.getSidebarOpacity());
+    }
+
+    @Test
     public void getConfig_reportsLocalFilePath() throws Exception {
         AppConfig.setM3uFilePath("/data/files/playlists/local.m3u");
         String[] res = request("GET", "/config/get", null, null);
