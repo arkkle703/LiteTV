@@ -8,6 +8,7 @@ import android.view.SurfaceHolder;
 
 import androidx.annotation.NonNull;
 
+import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.DefaultLoadControl;
 import com.google.android.exoplayer2.DefaultRenderersFactory;
 import com.google.android.exoplayer2.LoadControl;
@@ -17,6 +18,9 @@ import com.google.android.exoplayer2.Player;
 import com.google.android.exoplayer2.RenderersFactory;
 import com.google.android.exoplayer2.SimpleExoPlayer;
 import com.google.android.exoplayer2.analytics.DefaultAnalyticsCollector;
+import com.google.android.exoplayer2.mediacodec.MediaCodecInfo;
+import com.google.android.exoplayer2.mediacodec.MediaCodecSelector;
+import com.google.android.exoplayer2.mediacodec.MediaCodecUtil;
 import com.google.android.exoplayer2.source.DefaultMediaSourceFactory;
 import com.google.android.exoplayer2.source.MediaSource;
 import com.google.android.exoplayer2.trackselection.DefaultTrackSelector;
@@ -27,14 +31,19 @@ import com.google.android.exoplayer2.util.Clock;
 import com.google.android.exoplayer2.util.EventLogger;
 import com.google.android.exoplayer2.video.VideoSize;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import xyz.doikki.videoplayer.player.AbstractPlayer;
+import xyz.doikki.videoplayer.player.VideoViewConfig;
 import xyz.doikki.videoplayer.player.VideoViewManager;
 import xyz.doikki.videoplayer.util.PlayerUtils;
 
 public class ExoMediaPlayer extends AbstractPlayer implements Player.Listener {
+
+    private static final String TAG = "ExoMediaPlayer";
 
     protected Context mAppContext;
     protected SimpleExoPlayer mInternalPlayer;
@@ -67,8 +76,7 @@ public class ExoMediaPlayer extends AbstractPlayer implements Player.Listener {
         }
         mInternalPlayer = new SimpleExoPlayer.Builder(
                 mAppContext,
-                mRenderersFactory == null ? mRenderersFactory = new DefaultRenderersFactory(mAppContext).setEnableDecoderFallback(true)  // 启用解码器回退，避免硬件加速问题
-                        .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER) : mRenderersFactory,
+                mRenderersFactory == null ? mRenderersFactory = createRenderersFactory(mAppContext) : mRenderersFactory,
                 mTrackSelector == null ? mTrackSelector = new DefaultTrackSelector(mAppContext) : mTrackSelector,
                 new DefaultMediaSourceFactory(mAppContext),
                 mLoadControl,
@@ -76,6 +84,7 @@ public class ExoMediaPlayer extends AbstractPlayer implements Player.Listener {
                 new DefaultAnalyticsCollector(Clock.DEFAULT))
                 .build();
         setOptions();
+        applyOutputPreferences();
 
         // 播放器日志（当开启日志且 mTrackSelector 为 MappingTrackSelector 时）
         if (VideoViewManager.getConfig().mIsEnableLog && mTrackSelector instanceof MappingTrackSelector) {
@@ -95,6 +104,96 @@ public class ExoMediaPlayer extends AbstractPlayer implements Player.Listener {
 
     public void setLoadControl(LoadControl loadControl) {
         mLoadControl = loadControl;
+    }
+
+    /**
+     * Builds the renderers factory for the configured decode mode. Software decoding is the escape
+     * hatch for devices whose hardware decoder cannot handle a stream ("channel will not open"),
+     * and insisting on hardware is for the opposite case: a soft fallback that looks worse than
+     * failing loudly.
+     */
+    static RenderersFactory createRenderersFactory(Context context) {        int mode = VideoViewManager.getConfig().mVideoDecodeMode;
+        DefaultRenderersFactory factory = new DefaultRenderersFactory(context)
+                .setEnableDecoderFallback(mode != VideoViewConfig.DECODE_HARDWARE)
+                .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER);
+        MediaCodecSelector selector = createCodecSelector(mode);
+        if (selector != null) {
+            factory.setMediaCodecSelector(selector);
+        }
+        return factory;
+    }
+
+    /**
+     * @return the selector for the decode mode, or null to keep ExoPlayer's own preference.
+     *     Public so hosts (and their tests) can reason about the chosen policy.
+     */
+    public static MediaCodecSelector createCodecSelector(int mode) {
+        if (mode == VideoViewConfig.DECODE_SOFTWARE) {
+            return new DecodePreferenceSelector(false);
+        }
+        if (mode == VideoViewConfig.DECODE_HARDWARE) {
+            return new DecodePreferenceSelector(true);
+        }
+        return null;
+    }
+
+    /**
+     * Applies per-output preferences that are not part of the renderers factory: the track
+     * selection policy and the frame-rate hint passed to the display.
+     */
+    private void applyOutputPreferences() {
+        VideoViewConfig config = VideoViewManager.getConfig();
+        if (mTrackSelector instanceof DefaultTrackSelector) {
+            DefaultTrackSelector trackSelector = (DefaultTrackSelector) mTrackSelector;
+            DefaultTrackSelector.Parameters.Builder parameters = trackSelector.buildUponParameters()
+                    // Playlists often carry several renditions of one channel; take the best one
+                    // instead of adapting down to the first that fits.
+                    .setForceHighestSupportedBitrate(true);
+            if (config.mTunnelingEnabled) {
+                parameters.setTunnelingEnabled(true);
+            }
+            trackSelector.setParameters(parameters.build());
+        }
+        try {
+            // Ask the TV to match its panel refresh rate to the stream (50Hz IPTV content on a
+            // 60Hz panel judders otherwise). Honoured from Android 11; harmless below that.
+            mInternalPlayer.setVideoChangeFrameRateStrategy(
+                    C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS);
+        } catch (Exception e) {
+            Log.d(TAG, "Frame-rate matching unavailable: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Keeps only the decoders matching the requested hardware/software preference. The platform's
+     * full list is returned when the device has none of the wanted kind, because falling back
+     * beats failing to start.
+     */
+    private static final class DecodePreferenceSelector implements MediaCodecSelector {
+
+        private final boolean mHardware;
+
+        DecodePreferenceSelector(boolean hardware) {
+            mHardware = hardware;
+        }
+
+        @Override
+        public List<MediaCodecInfo> getDecoderInfos(String mimeType, boolean requiresSecureDecoder,
+                                                   boolean requiresTunnelingDecoder)
+                throws MediaCodecUtil.DecoderQueryException {
+            List<MediaCodecInfo> all = MediaCodecSelector.DEFAULT.getDecoderInfos(
+                    mimeType, requiresSecureDecoder, requiresTunnelingDecoder);
+            if (all.size() <= 1) {
+                return all;
+            }
+            List<MediaCodecInfo> preferred = new ArrayList<>(all.size());
+            for (MediaCodecInfo info : all) {
+                if (info.hardwareAccelerated == mHardware) {
+                    preferred.add(info);
+                }
+            }
+            return preferred.isEmpty() ? all : preferred;
+        }
     }
 
     /**

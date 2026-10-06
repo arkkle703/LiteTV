@@ -72,6 +72,17 @@
     <string name="m3u_scan_grant_failed">此设备没有文件访问权限设置，请使用上面显示的文件夹。</string>
     <string name="m3u_scan_imported">已导入 %1$s</string>
     <string name="m3u_drop_dir">把 .m3u 文件放到：%1$s</string>
+
+    <string name="playback_section">播放设置</string>
+    <string name="video_render_mode">画面输出方式</string>
+    <string name="video_render_surface">SurfaceView（推荐，画面更清晰）</string>
+    <string name="video_render_texture">TextureView（兼容备用）</string>
+    <string name="video_decode_mode">解码方式</string>
+    <string name="video_decode_auto">自动（优先硬件，失败回退软件）</string>
+    <string name="video_decode_hardware">仅硬件解码</string>
+    <string name="video_decode_software">优先软件解码（可解决个别频道打不开）</string>
+    <string name="playback_settings_hint">修改后需重启应用生效。若画面有锯齿或偏模糊，请保持 SurfaceView；若个别频道打不开，可试“优先软件解码”。</string>
+    <string name="video_tunneling">视频直通显示（实验，部分电视画面更流畅）</string>
     <string name="m3u_file_copy_error">无法读取所选文件</string>
     <string name="m3u_file_too_large">文件过大（最大 8 MB）</string>
     <string name="m3u_file_priority_hint">设置本地文件后优先于上方 M3U 地址。</string>

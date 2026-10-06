@@ -72,6 +72,17 @@
     <string name="m3u_scan_grant_failed">This device does not offer file access settings. Use the folder shown above instead.</string>
     <string name="m3u_scan_imported">Imported %1$s</string>
     <string name="m3u_drop_dir">Drop an .m3u file into: %1$s</string>
+
+    <string name="playback_section">Playback</string>
+    <string name="video_render_mode">Video output</string>
+    <string name="video_render_surface">SurfaceView (recommended, sharper)</string>
+    <string name="video_render_texture">TextureView (compatibility fallback)</string>
+    <string name="video_decode_mode">Decoder</string>
+    <string name="video_decode_auto">Automatic (hardware, software fallback)</string>
+    <string name="video_decode_hardware">Hardware only</string>
+    <string name="video_decode_software">Prefer software (fixes channels that will not open)</string>
+    <string name="playback_settings_hint">Changing these takes effect after the app is restarted. If some channels show jagged edges or stay blurry, keep SurfaceView; if a channel refuses to play, try “Prefer software”.</string>
+    <string name="video_tunneling">Tunnel video to the display (experimental, for smoother output on some TVs)</string>
     <string name="m3u_file_copy_error">Cannot read the selected file</string>
     <string name="m3u_file_too_large">The file is too large (max 8 MB)</string>
     <string name="m3u_file_priority_hint">While a local file is set, it takes priority over the URL above.</string>

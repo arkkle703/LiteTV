@@ -4,12 +4,22 @@ package xyz.doikki.videoplayer.player;
 import androidx.annotation.Nullable;
 
 import xyz.doikki.videoplayer.render.RenderViewFactory;
-import xyz.doikki.videoplayer.render.TextureRenderViewFactory;
+import xyz.doikki.videoplayer.render.SurfaceRenderViewFactory;
 
 /**
  * 播放器全局配置
  */
 public class VideoViewConfig {
+
+    /** Let the platform pick the decoder, preferring hardware (see the ExoPlayer policy). */
+    public static final int DECODE_AUTO = 0;
+    /** Insist on a hardware decoder; a stream it cannot handle fails instead of turning soft. */
+    public static final int DECODE_HARDWARE = 1;
+    /**
+     * Prefer a software decoder. Slow for HD/4K, but it is the way out when a device's hardware
+     * decoder is broken for a particular stream (many channels then "cannot play" at all).
+     */
+    public static final int DECODE_SOFTWARE = 2;
 
     public static Builder newBuilder() {
         return new Builder();
@@ -31,6 +41,15 @@ public class VideoViewConfig {
 
     public final RenderViewFactory mRenderViewFactory;
 
+    /** One of {@link #DECODE_AUTO}, {@link #DECODE_HARDWARE}, {@link #DECODE_SOFTWARE}. */
+    public final int mVideoDecodeMode;
+
+    /**
+     * Routes decoded frames straight to the display ("tunneling") when the device supports it.
+     * Off by default: tunneling has many device-specific quirks and must be validated per box.
+     */
+    public final boolean mTunnelingEnabled;
+
     public final boolean mAdaptCutout;
 
     private VideoViewConfig(Builder builder) {
@@ -47,11 +66,14 @@ public class VideoViewConfig {
             mPlayerFactory = builder.mPlayerFactory;
         }
         if (builder.mRenderViewFactory == null) {
-            //默认使用TextureView渲染视频
-            mRenderViewFactory = TextureRenderViewFactory.create();
+            // Default to a SurfaceView: the video layer keeps the picture sharp and lets the SoC
+            // deinterlace 1080i feeds, unlike the GPU-composited TextureView fallback.
+            mRenderViewFactory = SurfaceRenderViewFactory.create();
         } else {
             mRenderViewFactory = builder.mRenderViewFactory;
         }
+        mVideoDecodeMode = builder.mVideoDecodeMode;
+        mTunnelingEnabled = builder.mTunnelingEnabled;
         mAdaptCutout = builder.mAdaptCutout;
     }
 
@@ -66,6 +88,8 @@ public class VideoViewConfig {
         private PlayerFactory mPlayerFactory;
         private int mScreenScaleType;
         private RenderViewFactory mRenderViewFactory;
+        private int mVideoDecodeMode = DECODE_AUTO;
+        private boolean mTunnelingEnabled = false;
         private boolean mAdaptCutout = true;
 
         /**
@@ -129,6 +153,22 @@ public class VideoViewConfig {
          */
         public Builder setRenderViewFactory(RenderViewFactory renderViewFactory) {
             mRenderViewFactory = renderViewFactory;
+            return this;
+        }
+
+        /**
+         * How the video decoder is chosen; see {@link #DECODE_AUTO} and friends.
+         */
+        public Builder setVideoDecodeMode(int videoDecodeMode) {
+            mVideoDecodeMode = videoDecodeMode;
+            return this;
+        }
+
+        /**
+         * Whether to let the decoder send frames straight to the display when supported.
+         */
+        public Builder setTunnelingEnabled(boolean tunnelingEnabled) {
+            mTunnelingEnabled = tunnelingEnabled;
             return this;
         }
 

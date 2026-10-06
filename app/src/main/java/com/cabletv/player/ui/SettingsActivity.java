@@ -23,6 +23,8 @@ import com.cabletv.player.config.AppConfig;
 import com.cabletv.player.server.ConfigWebServer;
 import com.cabletv.player.util.LocalPlaylistFolder;
 
+import xyz.doikki.videoplayer.player.VideoViewConfig;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -45,6 +47,9 @@ public class SettingsActivity extends Activity {
     private CheckBox mEpgDisplayToggle;
     private RadioGroup mSidebarOpacityGroup;
     private RadioGroup mEpgPreferenceGroup;
+    private RadioGroup mVideoRenderModeGroup;
+    private RadioGroup mVideoDecodeModeGroup;
+    private CheckBox mVideoTunnelingToggle;
     private TextView mEpgM3uEmbeddedText;
     private TextView mM3uFilePathText;
     private TextView mM3uDropDirText;
@@ -69,6 +74,9 @@ public class SettingsActivity extends Activity {
         mWebServerAddress = findViewById(R.id.web_server_address);
         mSidebarOpacityGroup = findViewById(R.id.sidebar_opacity_group);
         mEpgPreferenceGroup = findViewById(R.id.epg_preference_group);
+        mVideoRenderModeGroup = findViewById(R.id.video_render_mode_group);
+        mVideoDecodeModeGroup = findViewById(R.id.video_decode_mode_group);
+        mVideoTunnelingToggle = findViewById(R.id.video_tunneling_toggle);
         mEpgM3uEmbeddedText = findViewById(R.id.epg_m3u_embedded);
         mM3uFilePathText = findViewById(R.id.m3u_file_path_text);
         mM3uDropDirText = findViewById(R.id.m3u_drop_dir_text);
@@ -120,6 +128,49 @@ public class SettingsActivity extends Activity {
                 AppConfig.setEpgPreference(epgPreferenceOf(checkedId));
                 Toast.makeText(this, R.string.epg_preference_saved, Toast.LENGTH_SHORT).show();
             });
+        }
+
+        if (mVideoRenderModeGroup != null) {
+            mVideoRenderModeGroup.setOnCheckedChangeListener((group, checkedId) -> {
+                AppConfig.setVideoRenderMode(checkedId == R.id.video_render_texture
+                        ? AppConfig.RENDER_TEXTURE : AppConfig.RENDER_SURFACE);
+                Toast.makeText(this, R.string.playback_settings_hint, Toast.LENGTH_LONG).show();
+            });
+        }
+
+        if (mVideoDecodeModeGroup != null) {
+            mVideoDecodeModeGroup.setOnCheckedChangeListener((group, checkedId) -> {
+                AppConfig.setVideoDecodeMode(decodeModeOf(checkedId));
+                Toast.makeText(this, R.string.playback_settings_hint, Toast.LENGTH_LONG).show();
+            });
+        }
+
+        if (mVideoTunnelingToggle != null) {
+            mVideoTunnelingToggle.setOnCheckedChangeListener((button, isChecked) -> {
+                AppConfig.setTunnelingEnabled(isChecked);
+                Toast.makeText(this, R.string.playback_settings_hint, Toast.LENGTH_LONG).show();
+            });
+        }
+    }
+
+    private static int decodeModeOf(int checkedId) {
+        if (checkedId == R.id.video_decode_hardware) {
+            return VideoViewConfig.DECODE_HARDWARE;
+        }
+        if (checkedId == R.id.video_decode_software) {
+            return VideoViewConfig.DECODE_SOFTWARE;
+        }
+        return VideoViewConfig.DECODE_AUTO;
+    }
+
+    private static int decodeModeRadioId(int decodeMode) {
+        switch (decodeMode) {
+            case VideoViewConfig.DECODE_HARDWARE:
+                return R.id.video_decode_hardware;
+            case VideoViewConfig.DECODE_SOFTWARE:
+                return R.id.video_decode_software;
+            default:
+                return R.id.video_decode_auto;
         }
     }
 
@@ -178,6 +229,16 @@ public class SettingsActivity extends Activity {
         }
         if (mEpgPreferenceGroup != null) {
             mEpgPreferenceGroup.check(epgPreferenceRadioId(AppConfig.getEpgPreference()));
+        }
+        if (mVideoRenderModeGroup != null) {
+            mVideoRenderModeGroup.check(AppConfig.getVideoRenderMode() == AppConfig.RENDER_TEXTURE
+                    ? R.id.video_render_texture : R.id.video_render_surface);
+        }
+        if (mVideoDecodeModeGroup != null) {
+            mVideoDecodeModeGroup.check(decodeModeRadioId(AppConfig.getVideoDecodeMode()));
+        }
+        if (mVideoTunnelingToggle != null) {
+            mVideoTunnelingToggle.setChecked(AppConfig.isTunnelingEnabled());
         }
         updateM3uEpgInfo();
         updateM3uFileInfo();

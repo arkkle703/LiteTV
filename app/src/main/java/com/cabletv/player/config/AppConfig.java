@@ -8,6 +8,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import xyz.doikki.videoplayer.player.VideoViewConfig;
+
 public class AppConfig {
     private static final String M3U_URL_KEY = "app_m3u_url";
     private static final String EPG_URL_KEY = "app_epg_url";
@@ -21,6 +23,9 @@ public class AppConfig {
     private static final String FAVORITE_CHANNELS_KEY = "app_favorite_channels";
     private static final String EPG_PREFERENCE_KEY = "app_epg_preference";
     private static final String M3U_EPG_URLS_KEY = "app_m3u_epg_urls";
+    private static final String VIDEO_RENDER_MODE_KEY = "app_video_render_mode";
+    private static final String VIDEO_DECODE_MODE_KEY = "app_video_decode_mode";
+    private static final String VIDEO_TUNNELING_KEY = "app_video_tunneling";
 
     private static final String DEFAULT_EPG_URL = "";
     /**
@@ -103,6 +108,54 @@ public class AppConfig {
             return Collections.singletonList(userUrl);
         }
         return m3uUrls;
+    }
+
+    /**
+     * How video frames reach the screen. A SurfaceView (default) keeps the picture sharp and lets
+     * the SoC deinterlace 1080i feeds; a TextureView is the fallback for devices whose SurfaceView
+     * misbehaves. Changing it needs an app restart: the player config is read once per process.
+     */
+    public static final int RENDER_SURFACE = 0;
+    public static final int RENDER_TEXTURE = 1;
+
+    public static int getVideoRenderMode() {
+        int mode = Hawk.get(VIDEO_RENDER_MODE_KEY, RENDER_SURFACE);
+        return mode == RENDER_TEXTURE ? RENDER_TEXTURE : RENDER_SURFACE;
+    }
+
+    public static void setVideoRenderMode(int mode) {
+        Hawk.put(VIDEO_RENDER_MODE_KEY, mode == RENDER_TEXTURE ? RENDER_TEXTURE : RENDER_SURFACE);
+    }
+
+    /**
+     * Which decoder the player should use; see {@link VideoViewConfig} for the meanings. Software
+     * decoding rescues channels whose hardware decoder is broken on a particular device, at the
+     * cost of smoothness. Needs an app restart.
+     */
+    public static int getVideoDecodeMode() {
+        int mode = Hawk.get(VIDEO_DECODE_MODE_KEY, VideoViewConfig.DECODE_AUTO);
+        if (mode != VideoViewConfig.DECODE_HARDWARE && mode != VideoViewConfig.DECODE_SOFTWARE) {
+            return VideoViewConfig.DECODE_AUTO;
+        }
+        return mode;
+    }
+
+    public static void setVideoDecodeMode(int mode) {
+        Hawk.put(VIDEO_DECODE_MODE_KEY, mode);
+    }
+
+    /**
+     * Whether decoded frames may bypass the compositor and go straight to the display
+     * ("tunneling"). Off by default because it has device-specific quirks; on Amlogic-based TVs it
+     * is the path that lets the hardware video pipeline handle scaling, deinterlacing and refresh
+     * rate. Needs an app restart.
+     */
+    public static boolean isTunnelingEnabled() {
+        return Hawk.get(VIDEO_TUNNELING_KEY, false);
+    }
+
+    public static void setTunnelingEnabled(boolean enabled) {
+        Hawk.put(VIDEO_TUNNELING_KEY, enabled);
     }
 
     // Web Server
