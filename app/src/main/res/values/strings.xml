@@ -65,6 +65,13 @@
     <string name="m3u_file_saved">Local M3U file saved</string>
     <string name="m3u_file_cleared">Local M3U file removed</string>
     <string name="m3u_file_pick_error">Cannot open the file picker on this device</string>
+    <string name="m3u_scan_import">Import from folder</string>
+    <string name="m3u_scan_title">Choose a playlist file</string>
+    <string name="m3u_scan_empty">No .m3u / .txt file found.\n\nCopy one into:\n%1$s\n\nthen tap “Import from folder” again.</string>
+    <string name="m3u_scan_grant">Allow file access</string>
+    <string name="m3u_scan_grant_failed">This device does not offer file access settings. Use the folder shown above instead.</string>
+    <string name="m3u_scan_imported">Imported %1$s</string>
+    <string name="m3u_drop_dir">Drop an .m3u file into: %1$s</string>
     <string name="m3u_file_copy_error">Cannot read the selected file</string>
     <string name="m3u_file_too_large">The file is too large (max 8 MB)</string>
     <string name="m3u_file_priority_hint">While a local file is set, it takes priority over the URL above.</string>

@@ -65,6 +65,13 @@
     <string name="m3u_file_saved">本地 M3U 文件已保存</string>
     <string name="m3u_file_cleared">已移除本地 M3U 文件</string>
     <string name="m3u_file_pick_error">此设备无法打开文件选择器</string>
+    <string name="m3u_scan_import">从文件夹导入</string>
+    <string name="m3u_scan_title">选择播放列表文件</string>
+    <string name="m3u_scan_empty">未找到 .m3u / .txt 文件。\n\n请把文件复制到：\n%1$s\n\n然后再点一次“从文件夹导入”。</string>
+    <string name="m3u_scan_grant">授予文件访问权限</string>
+    <string name="m3u_scan_grant_failed">此设备没有文件访问权限设置，请使用上面显示的文件夹。</string>
+    <string name="m3u_scan_imported">已导入 %1$s</string>
+    <string name="m3u_drop_dir">把 .m3u 文件放到：%1$s</string>
     <string name="m3u_file_copy_error">无法读取所选文件</string>
     <string name="m3u_file_too_large">文件过大（最大 8 MB）</string>
     <string name="m3u_file_priority_hint">设置本地文件后优先于上方 M3U 地址。</string>

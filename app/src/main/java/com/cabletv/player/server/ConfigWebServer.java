@@ -57,8 +57,13 @@ public class ConfigWebServer {
 
     /** Cleared by the Activity in onDestroy(); volatile because server threads read it. */
     private static volatile OnConfigChangeListener sConfigChangeListener;
+    /** Kept only to answer /config/get (e.g. the playlist drop folder); never used to leak. */
+    private static volatile Context sAppContext;
 
     public static synchronized void startServer(Context context, int port) {
+        if (context != null) {
+            sAppContext = context.getApplicationContext();
+        }
         if (sRunning) {
             Log.i(TAG, "Server already running on port " + sServerSocket.getLocalPort());
             return;
@@ -437,6 +442,10 @@ public class ConfigWebServer {
         JsonObject config = new JsonObject();
         config.addProperty("m3u_url", AppConfig.getM3uUrl());
         config.addProperty("m3u_file_path", AppConfig.getM3uFilePath());
+        // Where to drop a playlist when the TV has no document picker (issue #7).
+        Context appContext = sAppContext;
+        config.addProperty("m3u_drop_dir", appContext == null ? ""
+                : com.cabletv.player.util.LocalPlaylistFolder.dropDir(appContext).getAbsolutePath());
         config.addProperty("epg_url", AppConfig.getEpgUrl());
         config.addProperty("epg_preference", AppConfig.getEpgPreference());
         config.add("m3u_epg_urls", new com.google.gson.Gson().toJsonTree(AppConfig.getM3uEpgUrls()));
@@ -497,6 +506,7 @@ public class ConfigWebServer {
                 "            <button onclick=\"saveM3uUrl()\">保存 M3U URL</button>\n" +
                 "            <div id=\"m3uStatus\" class=\"status\"></div>\n" +
                 "            <div id=\"m3uFileInfo\" class=\"info\"></div>\n" +
+                "            <div id=\"m3uDropDirInfo\" class=\"info\"></div>\n" +
                 "            <button id=\"clearM3uFileBtn\" onclick=\"clearM3uFile()\" style=\"display:none;\">清除本地文件</button>\n" +
                 "            <div id=\"m3uFileStatus\" class=\"status\"></div>\n" +
                 "        </div>\n" +
@@ -610,6 +620,10 @@ public class ConfigWebServer {
                 "                document.getElementById('epgUrl').value = d.epg_url || '';\n" +
                 "                document.getElementById('epgPreference').value = d.epg_preference || 'auto';\n" +
                 "                const m3uFile = d.m3u_file_path || '';\n" +
+                "                const dropDir = d.m3u_drop_dir || '';\n" +
+                "                if (dropDir) {\n" +
+                "                    document.getElementById('m3uDropDirInfo').textContent = '也可把 .m3u 文件放到电视上：' + dropDir + '，再在电视设置里点「从文件夹导入」';\n" +
+                "                }\n" +
                 "                if (m3uFile) {\n" +
                 "                    document.getElementById('m3uFileInfo').textContent = '本地 M3U 文件生效: ' + m3uFile;\n" +
                 "                    document.getElementById('clearM3uFileBtn').style.display = 'block';\n" +

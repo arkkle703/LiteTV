@@ -1,10 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="com.cabletv.player">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!--
+        Reading a playlist the user copied onto the device. Android 10 and older need the legacy
+        storage permission; on Android 11+ the same job needs all-files access, because scoped
+        storage hides /sdcard/LiteTV and USB volumes from a normal app. Both are only ever used
+        to scan the advertised drop folder (issue #7), and all-files access is requested from the
+        settings screen rather than assumed. This app is distributed as a sideloaded APK, not
+        through Play, so the all-files permission is allowed here.
+    -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
 
     <application
         android:name=".App"

@@ -133,6 +133,25 @@
                     android:focusable="true" />
 
                 <Button
+                    android:id="@+id/scan_m3u_file_btn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/m3u_scan_import"
+                    android:background="@drawable/button_focus_selector"
+                    android:textColor="@color/text_primary"
+                    android:padding="12dp"
+                    android:layout_marginTop="8dp"
+                    android:focusable="true" />
+
+                <TextView
+                    android:id="@+id/m3u_drop_dir_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp"
+                    android:layout_marginTop="6dp" />
+
+                <Button
                     android:id="@+id/clear_m3u_file_btn"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"

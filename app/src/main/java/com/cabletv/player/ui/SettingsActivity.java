@@ -1,11 +1,14 @@
 package com.cabletv.player.ui;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.net.wifi.WifiManager;
+import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.Log;
 import android.widget.Button;
@@ -18,8 +21,10 @@ import android.widget.Toast;
 import com.cabletv.player.R;
 import com.cabletv.player.config.AppConfig;
 import com.cabletv.player.server.ConfigWebServer;
+import com.cabletv.player.util.LocalPlaylistFolder;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -29,6 +34,7 @@ import java.util.List;
 public class SettingsActivity extends Activity {
     private static final String TAG = "SettingsActivity";
     private static final int REQUEST_PICK_M3U_FILE = 1001;
+    private static final int REQUEST_STORAGE_PERMISSION = 1002;
     /** Same ceiling as ChannelRepository, so a playlist that loads here also loads there. */
     private static final long MAX_LOCAL_M3U_BYTES = 8 * 1024 * 1024;
 
@@ -41,6 +47,7 @@ public class SettingsActivity extends Activity {
     private RadioGroup mEpgPreferenceGroup;
     private TextView mEpgM3uEmbeddedText;
     private TextView mM3uFilePathText;
+    private TextView mM3uDropDirText;
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
@@ -64,10 +71,12 @@ public class SettingsActivity extends Activity {
         mEpgPreferenceGroup = findViewById(R.id.epg_preference_group);
         mEpgM3uEmbeddedText = findViewById(R.id.epg_m3u_embedded);
         mM3uFilePathText = findViewById(R.id.m3u_file_path_text);
+        mM3uDropDirText = findViewById(R.id.m3u_drop_dir_text);
 
         Button saveM3uBtn = findViewById(R.id.save_m3u_btn);
         Button saveEpgBtn = findViewById(R.id.save_epg_btn);
         Button pickM3uFileBtn = findViewById(R.id.pick_m3u_file_btn);
+        Button scanM3uFileBtn = findViewById(R.id.scan_m3u_file_btn);
         Button clearM3uFileBtn = findViewById(R.id.clear_m3u_file_btn);
 
         // Find or create EPG display toggle
@@ -87,6 +96,7 @@ public class SettingsActivity extends Activity {
         saveM3uBtn.setOnClickListener(v -> saveM3uUrl());
         saveEpgBtn.setOnClickListener(v -> saveEpgUrl());
         pickM3uFileBtn.setOnClickListener(v -> pickM3uFile());
+        scanM3uFileBtn.setOnClickListener(v -> showFolderImportDialog());
         clearM3uFileBtn.setOnClickListener(v -> clearM3uFile());
         mWebServerToggle.setOnCheckedChangeListener((btn, isChecked) -> handleWebServerToggle(isChecked));
 
@@ -171,6 +181,7 @@ public class SettingsActivity extends Activity {
         }
         updateM3uEpgInfo();
         updateM3uFileInfo();
+        updateM3uDropDirText();
         updateWebServerAddress();
     }
 
@@ -187,9 +198,103 @@ public class SettingsActivity extends Activity {
         try {
             startActivityForResult(intent, REQUEST_PICK_M3U_FILE);
         } catch (Exception e) {
-            Log.w(TAG, "No document picker available", e);
+            // Android TV builds frequently ship without a documents provider, so instead of
+            // dead-ending, fall back to the folder the user can copy a file into (issue #7).
+            Log.w(TAG, "No document picker available, offering folder import", e);
             Toast.makeText(this, R.string.m3u_file_pick_error, Toast.LENGTH_LONG).show();
+            showFolderImportDialog();
         }
+    }
+
+    /**
+     * Imports a playlist from a folder rather than the document picker. Scans the advertised drop
+     * folder plus Download and any mounted volume, then copies the chosen file into app storage.
+     */
+    private void showFolderImportDialog() {
+        File dropDir = LocalPlaylistFolder.dropDir(this);
+        updateM3uDropDirText();
+        List<File> files = LocalPlaylistFolder.scan(
+                LocalPlaylistFolder.candidateDirs(this), LocalPlaylistFolder.MAX_FILE_BYTES);
+        if (files.isEmpty()) {
+            AlertDialog.Builder builder = new AlertDialog.Builder(this)
+                    .setTitle(R.string.m3u_scan_title)
+                    .setMessage(getString(R.string.m3u_scan_empty, dropDir.getAbsolutePath()))
+                    .setPositiveButton(android.R.string.ok, null);
+            if (!LocalPlaylistFolder.canUseSharedStorage(this)) {
+                builder.setNeutralButton(R.string.m3u_scan_grant,
+                        (dialog, which) -> requestStorageAccess());
+            }
+            builder.show();
+            return;
+        }
+        String[] labels = new String[files.size()];
+        for (int i = 0; i < files.size(); i++) {
+            File file = files.get(i);
+            labels[i] = file.getName() + "\n" + file.getParent();
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.m3u_scan_title)
+                .setItems(labels, (dialog, which) -> importScannedFile(files.get(which)))
+                .setNegativeButton(R.string.exit_cancel, null)
+                .show();
+    }
+
+    /** Copies a scanned playlist into app storage and makes it the active local file. */
+    private void importScannedFile(File source) {
+        String path = importFileIntoAppStorage(source);
+        if (path == null) {
+            int errorRes = mLastFilePickError;
+            mLastFilePickError = 0;
+            Toast.makeText(this, errorRes != 0 ? errorRes : R.string.m3u_file_copy_error,
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        AppConfig.setM3uFilePath(path);
+        Toast.makeText(this, getString(R.string.m3u_scan_imported, source.getName()),
+                Toast.LENGTH_SHORT).show();
+        updateM3uFileInfo();
+    }
+
+    /** Asks for shared-storage access so the public drop folder can be scanned. */
+    private void requestStorageAccess() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                startActivity(new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:" + getPackageName())));
+                return;
+            } catch (Exception e) {
+                Log.d(TAG, "App-specific all-files settings unavailable: " + e.getMessage());
+            }
+            try {
+                startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+                return;
+            } catch (Exception e) {
+                Log.d(TAG, "All-files settings unavailable: " + e.getMessage());
+            }
+            Toast.makeText(this, R.string.m3u_scan_grant_failed, Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            requestPermissions(new String[]{android.Manifest.permission.READ_EXTERNAL_STORAGE},
+                    REQUEST_STORAGE_PERMISSION);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_STORAGE_PERMISSION) {
+            updateM3uDropDirText();
+            showFolderImportDialog();
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // The user may have just granted all-files access in system settings; the advertised
+        // folder moves to /sdcard/LiteTV once that is available.
+        updateM3uDropDirText();
     }
 
     @Override
@@ -229,36 +334,16 @@ public class SettingsActivity extends Activity {
      * @return the absolute path of the copy, or null when the file could not be read.
      */
     private String copyToAppStorage(Uri uri) {
-        mLastFilePickError = 0;
+        if (uri == null) {
+            return null;
+        }
         try {
             InputStream in = getContentResolver().openInputStream(uri);
             if (in == null) {
                 return null;
             }
             try {
-                File dir = new File(getFilesDir(), "playlists");
-                if (!dir.exists() && !dir.mkdirs()) {
-                    return null;
-                }
-                File target = new File(dir, "local.m3u");
-                OutputStream out = new FileOutputStream(target);
-                try {
-                    byte[] buffer = new byte[8192];
-                    long total = 0;
-                    int read;
-                    while ((read = in.read(buffer)) != -1) {
-                        total += read;
-                        if (total > MAX_LOCAL_M3U_BYTES) {
-                            mLastFilePickError = R.string.m3u_file_too_large;
-                            return null;
-                        }
-                        out.write(buffer, 0, read);
-                    }
-                    out.flush();
-                } finally {
-                    closeQuietly(out);
-                }
-                return target.getAbsolutePath();
+                return copyStreamToPlaylist(in);
             } finally {
                 closeQuietly(in);
             }
@@ -266,6 +351,56 @@ public class SettingsActivity extends Activity {
             Log.e(TAG, "Error copying picked M3U file", e);
             return null;
         }
+    }
+
+    /** Same as {@link #copyToAppStorage(Uri)} for a file found by the folder scan. */
+    private String importFileIntoAppStorage(File source) {
+        if (source == null) {
+            return null;
+        }
+        try {
+            InputStream in = new FileInputStream(source);
+            try {
+                return copyStreamToPlaylist(in);
+            } finally {
+                closeQuietly(in);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error importing scanned M3U file", e);
+            return null;
+        }
+    }
+
+    /**
+     * Streams a playlist into the single app-private slot.
+     *
+     * @return the stored path, or null; {@link #mLastFilePickError} carries the reason.
+     */
+    private String copyStreamToPlaylist(InputStream in) throws IOException {
+        mLastFilePickError = 0;
+        File dir = new File(getFilesDir(), "playlists");
+        if (!dir.exists() && !dir.mkdirs()) {
+            return null;
+        }
+        File target = new File(dir, "local.m3u");
+        OutputStream out = new FileOutputStream(target);
+        try {
+            byte[] buffer = new byte[8192];
+            long total = 0;
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                total += read;
+                if (total > MAX_LOCAL_M3U_BYTES) {
+                    mLastFilePickError = R.string.m3u_file_too_large;
+                    return null;
+                }
+                out.write(buffer, 0, read);
+            }
+            out.flush();
+        } finally {
+            closeQuietly(out);
+        }
+        return target.getAbsolutePath();
     }
 
     private void clearM3uFile() {
@@ -296,6 +431,18 @@ public class SettingsActivity extends Activity {
                 mM3uFilePathText.setText(getString(R.string.m3u_file_missing, name));
             }
         }
+    }
+
+    /**
+     * Names the folder the user can drop a playlist into. This is the import path on devices
+     * without a document picker, so it is always shown next to the file buttons.
+     */
+    private void updateM3uDropDirText() {
+        if (mM3uDropDirText == null) {
+            return;
+        }
+        mM3uDropDirText.setText(getString(R.string.m3u_drop_dir,
+                LocalPlaylistFolder.dropDir(this).getAbsolutePath()));
     }
 
     private static void closeQuietly(java.io.Closeable closeable) {

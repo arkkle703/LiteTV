@@ -63,17 +63,7 @@ public class ExoMediaPlayer extends AbstractPlayer implements Player.Listener {
     @Override
     public void initPlayer() {
         if (mLoadControl == null) {
-            // Live streaming buffering. The old 3s cap with 200/500ms resume thresholds made
-            // unstable or 4K feeds (rtp2httpd relays multicast, which arrives in jittery
-            // bursts) stall in endless rebuffer cycles, showing up as 花屏 / 缓冲频繁. Start
-            // fast (minBuffer 1s keeps channel switching quick) but hold 10s ahead and demand
-            // 2.5s before resuming after a rebuffer so a single jitter spike cannot loop.
-            mLoadControl = new DefaultLoadControl.Builder()
-                    .setBufferDurationsMs(1_000, 10_000, 500, 2_500)
-                    .setTargetBufferBytes(8 * 1024 * 1024)
-                    .setPrioritizeTimeOverSizeThresholds(true)
-                    .setBackBuffer(0, false)
-                    .build();
+            mLoadControl = createDefaultLoadControl();
         }
         mInternalPlayer = new SimpleExoPlayer.Builder(
                 mAppContext,
@@ -105,6 +95,30 @@ public class ExoMediaPlayer extends AbstractPlayer implements Player.Listener {
 
     public void setLoadControl(LoadControl loadControl) {
         mLoadControl = loadControl;
+    }
+
+    /**
+     * The buffering policy for live streams. Kept in one place and public so a unit test can
+     * guard the values: {@link DefaultLoadControl.Builder#setBufferDurationsMs} asserts
+     * {@code minBufferMs >= bufferForPlaybackMs} and
+     * {@code minBufferMs >= bufferForPlaybackAfterRebufferMs}, and violating that crashed the app
+     * on the first channel change (issue #6).
+     *
+     * <p>The proportions matter as much as the values. Playback starts once
+     * {@code bufferForPlaybackMs} is buffered, so 500ms keeps channel switching snappy; a
+     * rebuffer only resumes after {@code bufferForPlaybackAfterRebufferMs} (1.5s) so a jitter
+     * burst cannot loop; {@code minBufferMs} (1.5s) is what the loader keeps topped up and
+     * {@code maxBufferMs} (12s) gives 4K feeds room to ride out network bursts. The previous
+     * 200/500ms thresholds started playback with barely any buffer, which showed up as constant
+     * rebuffering.
+     */
+    public static LoadControl createDefaultLoadControl() {
+        return new DefaultLoadControl.Builder()
+                .setBufferDurationsMs(1_500, 12_000, 500, 1_500)
+                .setTargetBufferBytes(8 * 1024 * 1024)
+                .setPrioritizeTimeOverSizeThresholds(true)
+                .setBackBuffer(0, false)
+                .build();
     }
 
     @Override
