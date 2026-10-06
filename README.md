@@ -46,7 +46,7 @@
 ### 🗂️ 频道管理
 - M3U 解析：分组（`group-title`）、台标（`tvg-logo`）、频道 ID（`tvg-id`）、多源、UA/Referer
 - **本地 M3U 文件**：在设置中选择 U 盘 / 内置存储中的 `.m3u` 文件直接导入（系统文件选择器，无需存储权限），文件会拷贝到应用私有目录，拔掉 U 盘也不影响使用；设置后优先于网络地址，可在设置或 Web 页面中随时移除
-- **无文件选择器的电视 / 盒子**：设置页提供「从文件夹导入」（扫描投放目录、Download 及 U 盘卷，列出找到的 `.m3u`/`.txt` 文件供选择）。投放目录路径会显示在设置页与 Web 配置页；Android 11+ 可一键跳转系统设置授予「所有文件访问权限」以让该目录（`/sdcard/LiteTV`）可写（issue #7）
+- **无文件选择器的电视 / 盒子**：设置页提供「从文件夹导入」（扫描投放目录、Download 及 U 盘卷，列出找到的 `.m3u`/`.txt` 文件供选择），或在 **Web 配置页直接上传 M3U 文件**（手机 / 电脑选文件，电视端自动重新加载）。投放目录路径会显示在设置页与 Web 配置页；Android 11+ 可一键跳转系统设置授予「所有文件访问权限」以让该目录（`/sdcard/LiteTV`）可写（issue #7）
 - **分组导航**：内置「我的收藏」「全部频道」+ 播放列表自带分组
 - **收藏频道**：频道列表频道栏长按 OK 标记 / 取消（按频道名保存，刷新后依然有效）
 - **播放列表磁盘缓存**：网络故障时自动使用缓存播放
@@ -76,7 +76,7 @@
 - Socket HTTP 服务器，零外部依赖，默认端口 **8899**
 - 浏览器打开 `http://电视IP:8899` 即可可视化配置
 - 与电视端设置页**可配置项一致**：M3U 地址 / 本地文件（查看与移除）/ EPG 地址 / EPG 来源优先级 / EPG 显示开关 / 菜单透明度 / 画面输出方式 / 解码方式 / 视频直通
-- REST 接口：`GET /config/get`、`POST /config/m3u-url`、`POST /config/epg-url`、`POST /config/epg-preference`、`POST /config/m3u-file-clear`、`POST /config/playback`、`POST /config/display`
+- REST 接口：`GET /config/get`、`POST /config/m3u-url`、`POST /config/epg-url`、`POST /config/epg-preference`、`POST /config/m3u-file-clear`、`POST /config/m3u-file-upload`（multipart 上传 M3U）、`POST /config/playback`、`POST /config/display`
 - 安全加固：跨站请求防护（Origin 校验）、请求体上限、超时、有界线程池
 
 ### ⚙️ 设置项

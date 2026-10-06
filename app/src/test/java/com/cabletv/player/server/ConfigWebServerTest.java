@@ -111,6 +111,106 @@ public class ConfigWebServerTest {
         return new String[]{m.group(1), bodyPart};
     }
 
+    @Test
+    public void upload_storesTheFileActivatesItAndNotifiesTheApp() throws Exception {
+        String boundary = "----LiteTVTest";
+        String playlist = "#EXTM3U\n#EXTINF:-1,Uploaded One\nhttp://stream/one\n"
+                + "#EXTINF:-1,上传频道\nhttp://stream/two\n";
+        String res[] = request("POST", "/config/m3u-file-upload",
+                "Content-Type: multipart/form-data; boundary=" + boundary + "\r\n",
+                multipartBody(boundary, "uploaded.m3u", playlist));
+        assertEquals("200", res[0]);
+        assertTrue("must report success: " + res[1], res[1].contains("\"success\":true"));
+
+        String stored = AppConfig.getM3uFilePath();
+        assertTrue("a path must be recorded, got " + stored, stored != null && stored.endsWith("local.m3u"));
+        File file = new File(stored);
+        assertTrue("the playlist must exist on disk", file.exists());
+        // Non-ASCII content must survive the byte-exact multipart handling.
+        String readBack = new String(java.nio.file.Files.readAllBytes(file.toPath()),
+                StandardCharsets.UTF_8);
+        assertEquals("the stored bytes must match the upload exactly", playlist, readBack);
+        assertEquals("the app must be told to reload", stored, mLastFileChange.get());
+    }
+
+    @Test
+    public void upload_rejectsSomethingThatIsNotAPlaylist() throws Exception {
+        String boundary = "----LiteTVTest";
+        String[] res = request("POST", "/config/m3u-file-upload",
+                "Content-Type: multipart/form-data; boundary=" + boundary + "\r\n",
+                multipartBody(boundary, "photo.jpg", "binary junk that is not a playlist"));
+        assertEquals("200", res[0]);
+        assertTrue("a non-playlist must be refused: " + res[1], res[1].contains("\"success\":false"));
+        assertEquals("nothing may be activated", "", AppConfig.getM3uFilePath());
+    }
+
+    @Test
+    public void upload_acceptsATxtPlaylistWithoutTheExtM3uHeader() throws Exception {
+        String boundary = "----LiteTVTest";
+        String txt = "央视频道,#genre#\nCCTV1,http://stream/one\n";
+        String[] res = request("POST", "/config/m3u-file-upload",
+                "Content-Type: multipart/form-data; boundary=" + boundary + "\r\n",
+                multipartBody(boundary, "list.txt", txt));
+        assertTrue(res[1].contains("\"success\":true"));
+    }
+
+    @Test
+    public void upload_rejectsMultipartOnFormEndpoints() throws Exception {
+        String boundary = "----LiteTVTest";
+        String[] res = request("POST", "/config/m3u-url",
+                "Content-Type: multipart/form-data; boundary=" + boundary + "\r\n",
+                multipartBody(boundary, "x.m3u", "#EXTM3U\n"));
+        assertEquals("415", res[0]);
+    }
+
+    @Test
+    public void upload_crossSiteIsRejected() throws Exception {
+        String boundary = "----LiteTVTest";
+        String[] res = request("POST", "/config/m3u-file-upload",
+                "Content-Type: multipart/form-data; boundary=" + boundary + "\r\n"
+                        + "Origin: http://evil.example\r\n",
+                multipartBody(boundary, "x.m3u", "#EXTM3U\n"));
+        assertEquals("403", res[0]);
+    }
+
+    /** Parser-level check so a failure points at the multipart handling, not at HTTP plumbing. */
+    @Test
+    public void parseMultipartFile_extractsNameAndExactBytes() {
+        String boundary = "----LiteTVTest";
+        byte[] body = multipartBody(boundary, "a.m3u", "#EXTM3U\n#EXTINF:-1,CCTV1\n").getBytes(StandardCharsets.UTF_8);
+        ConfigWebServer.MultipartFile parsed = ConfigWebServer.parseMultipartFile(
+                body, "multipart/form-data; boundary=" + boundary);
+        assertTrue("parser returned null for body: "
+                + new String(body, StandardCharsets.ISO_8859_1).replace("\r", "\\r").replace("\n", "\\n"),
+                parsed != null);
+        assertEquals("a.m3u", parsed.fileName);
+        assertEquals("#EXTM3U\n#EXTINF:-1,CCTV1\n", new String(parsed.content, StandardCharsets.UTF_8));
+    }
+
+
+    @Test
+    public void parseMultipartFile_restoresAUtf8FileName() {
+        String boundary = "----LiteTVTest";
+        byte[] body = ("--" + boundary + "\r\n"
+                + "Content-Disposition: form-data; name=\"file\"; filename=\"\u4e0a\u4f20.m3u\"\r\n"
+                + "Content-Type: application/octet-stream\r\n\r\n"
+                + "#EXTM3U\n"
+                + "\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8);
+        ConfigWebServer.MultipartFile parsed = ConfigWebServer.parseMultipartFile(
+                body, "multipart/form-data; boundary=" + boundary);
+        assertTrue(parsed != null);
+        assertEquals("\u4e0a\u4f20.m3u", parsed.fileName);
+    }
+
+    /** Builds a one-file multipart/form-data body matching the boundary. */
+    private static String multipartBody(String boundary, String fileName, String content) {
+        return "--" + boundary + "\r\n"
+                + "Content-Disposition: form-data; name=\"file\"; filename=\"" + fileName + "\"\r\n"
+                + "Content-Type: application/octet-stream\r\n\r\n"
+                + content
+                + "\r\n--" + boundary + "--\r\n";
+    }
+
     // ---- /config/get ----
 
     @Test

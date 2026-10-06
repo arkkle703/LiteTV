@@ -5,6 +5,7 @@ import android.text.TextUtils;
 import android.util.Log;
 
 import com.cabletv.player.config.AppConfig;
+import com.cabletv.player.util.LocalPlaylistFolder;
 import com.google.gson.JsonObject;
 
 import xyz.doikki.videoplayer.player.VideoViewConfig;
@@ -24,6 +25,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class ConfigWebServer {
     private static final String TAG = "ConfigWebServer";
@@ -34,6 +37,9 @@ public class ConfigWebServer {
     private static final int MAX_HEADER_LINES = 64;
     /** Body cap; the only bodies we accept are two short form fields. */
     private static final int MAX_BODY_BYTES = 64 * 1024;
+    /** Playlist uploads are bounded by the same 8 MB ceiling ChannelRepository enforces. */
+    private static final int MAX_UPLOAD_BYTES = 8 * 1024 * 1024 + 64 * 1024;
+    private static final String UPLOAD_PATH = "/config/m3u-file-upload";
     /**
      * A client that connects but never sends a request head must release its worker
      * quickly, otherwise a handful of idle sockets makes the server unavailable.
@@ -41,6 +47,8 @@ public class ConfigWebServer {
     private static final int HEAD_TIMEOUT_MS = 3_000;
     /** Once a valid head has arrived, allow a slower body transfer. */
     private static final int BODY_TIMEOUT_MS = 10_000;
+    /** A playlist upload over Wi-Fi can be several MB, so it gets its own budget. */
+    private static final int UPLOAD_TIMEOUT_MS = 60_000;
     /** Bounded worker pool, so many connections cannot exhaust threads. */
     private static final int MAX_WORKERS = 8;
 
@@ -175,7 +183,7 @@ public class ConfigWebServer {
                         sendResponse(socket, "400 Bad Request", 400, "text/plain");
                         return;
                     }
-                    if (contentLength > MAX_BODY_BYTES) {
+                    if (contentLength > bodyLimitFor(path)) {
                         sendResponse(socket, "413 Payload Too Large", 413, "text/plain");
                         return;
                     }
@@ -184,19 +192,21 @@ public class ConfigWebServer {
                 } else if (lower.startsWith("host:")) {
                     host = line.substring("host:".length()).trim();
                 } else if (lower.startsWith("content-type:")) {
-                    requestContentType = lower.substring("content-type:".length()).trim();
+                    // Keep the original case: the multipart boundary is case-sensitive even though
+                    // the header name and parameters are not.
+                    requestContentType = line.substring("content-type:".length()).trim();
                 }
             }
 
-            // Read body (exact byte count, then decode as UTF-8 — char counts and
-            // Content-Length disagree for non-ASCII URLs).
-            String body = "";
+            // Read body (exact byte count). Kept as bytes because a multipart upload can hold
+            // content that is not valid UTF-8; the text form is decoded only when needed.
+            byte[] rawBody = null;
             if (contentLength > 0) {
-                socket.setSoTimeout(BODY_TIMEOUT_MS);
-                byte[] raw = new byte[contentLength];
+                socket.setSoTimeout(UPLOAD_PATH.equals(path) ? UPLOAD_TIMEOUT_MS : BODY_TIMEOUT_MS);
+                rawBody = new byte[contentLength];
                 int off = 0;
                 while (off < contentLength) {
-                    int n = in.read(raw, off, contentLength - off);
+                    int n = in.read(rawBody, off, contentLength - off);
                     if (n == -1) break;
                     off += n;
                 }
@@ -204,8 +214,8 @@ public class ConfigWebServer {
                     sendResponse(socket, "400 Bad Request", 400, "text/plain");
                     return;
                 }
-                body = new String(raw, "UTF-8");
             }
+            String body = rawBody == null ? "" : new String(rawBody, "UTF-8");
 
             if ("POST".equals(method)) {
                 // The server has no authentication, so it must at least refuse
@@ -218,7 +228,10 @@ public class ConfigWebServer {
                     sendResponse(socket, "403 Forbidden", 403, "text/plain");
                     return;
                 }
-                if (!requestContentType.startsWith("application/x-www-form-urlencoded")) {
+                String requestType = requestContentType.toLowerCase();
+                if (!requestType.startsWith("application/x-www-form-urlencoded")
+                        && !(UPLOAD_PATH.equals(path)
+                        && requestType.startsWith("multipart/form-data"))) {
                     sendResponse(socket, "415 Unsupported Media Type", 415, "text/plain");
                     return;
                 }
@@ -249,6 +262,9 @@ public class ConfigWebServer {
                 contentType = "application/json";
             } else if ("POST".equals(method) && "/config/display".equals(path)) {
                 response = handleDisplayPost(body);
+                contentType = "application/json";
+            } else if ("POST".equals(method) && UPLOAD_PATH.equals(path)) {
+                response = handleM3uFileUpload(rawBody, requestContentType);
                 contentType = "application/json";
             } else {
                 sendResponse(socket, "404 Not Found", 404, "text/plain");
@@ -292,10 +308,15 @@ public class ConfigWebServer {
             long length = Long.parseLong(value.trim());
             if (length < 0) return -1;
             // Clamp instead of overflowing; caller rejects anything over the cap.
-            return length > MAX_BODY_BYTES ? MAX_BODY_BYTES + 1 : (int) length;
+            return length > MAX_UPLOAD_BYTES ? MAX_UPLOAD_BYTES + 1 : (int) length;
         } catch (NumberFormatException e) {
             return -1;
         }
+    }
+
+    /** Playlist uploads may be several MB; every other request stays tiny. */
+    private static int bodyLimitFor(String path) {
+        return UPLOAD_PATH.equals(path) ? MAX_UPLOAD_BYTES : MAX_BODY_BYTES;
     }
 
     /**
@@ -573,6 +594,144 @@ public class ConfigWebServer {
         return json.toString();
     }
 
+    /**
+     * Accepts a playlist uploaded from the browser and makes it the active local file. This is the
+     * import path that works on TVs with no document picker and no reachable drop folder: the user
+     * picks the file on their phone or PC and the TV fetches it over the LAN.
+     */
+    private static String handleM3uFileUpload(byte[] rawBody, String contentType) {
+        Context appContext = sAppContext;
+        if (appContext == null) {
+            return jsonResult(false, "Server not ready");
+        }
+        MultipartFile file = parseMultipartFile(rawBody, contentType);
+        if (file == null || file.content.length == 0) {
+            return jsonResult(false, "No file in the upload");
+        }
+        if (file.content.length > LocalPlaylistFolder.MAX_FILE_BYTES) {
+            return jsonResult(false, "File is larger than 8 MB");
+        }
+        if (!LocalPlaylistFolder.looksLikePlaylist(file.fileName, file.content)) {
+            return jsonResult(false, "That does not look like an M3U/TXT playlist");
+        }
+        String path = LocalPlaylistFolder.writePlaylist(appContext, file.content);
+        if (path == null) {
+            return jsonResult(false, "Could not store the playlist");
+        }
+        AppConfig.setM3uFilePath(path);
+        Log.i(TAG, "Playlist uploaded from the web page: " + file.fileName
+                + " (" + file.content.length + " bytes)");
+        OnConfigChangeListener listener = sConfigChangeListener;
+        if (listener != null) {
+            listener.onM3uFileChanged(path);
+        }
+        return jsonResult(true, "Playlist uploaded and activated");
+    }
+
+    /** A file part of a multipart/form-data body. */
+    static final class MultipartFile {
+        final String fileName;
+        final byte[] content;
+
+        MultipartFile(String fileName, byte[] content) {
+            this.fileName = fileName;
+            this.content = content;
+        }
+    }
+
+    /**
+     * Extracts the first file part from a multipart/form-data body.
+     *
+     * <p>Parsed over an ISO-8859-1 view of the bytes so string indices map 1:1 onto byte offsets;
+     * that keeps the payload byte-exact (UTF-8 playlists are not ASCII) without hand-writing a
+     * byte search.
+     *
+     * @return the part, or null when the body is malformed or carries no file.
+     */
+    static MultipartFile parseMultipartFile(byte[] body, String contentType) {
+        if (body == null || body.length == 0 || contentType == null) {
+            return null;
+        }
+        String boundary = boundaryOf(contentType);
+        if (boundary == null || boundary.isEmpty()) {
+            return null;
+        }
+        String raw = new String(body, java.nio.charset.StandardCharsets.ISO_8859_1);
+        String delimiter = "--" + boundary;
+        int firstPart = raw.indexOf(delimiter);
+        if (firstPart < 0) {
+            return null;
+        }
+        int cursor = raw.indexOf("\r\n\r\n", firstPart);
+        if (cursor < 0) {
+            return null;
+        }
+        String headers = raw.substring(firstPart, cursor);
+        String fileName = filenameOf(headers);
+        int contentStart = cursor + 4;
+        int contentEnd = raw.indexOf("\r\n" + delimiter, contentStart);
+        if (contentEnd < 0) {
+            contentEnd = raw.length();
+        }
+        byte[] content = raw.substring(contentStart, contentEnd)
+                .getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+        return new MultipartFile(fileName, content);
+    }
+
+    /** @return the boundary parameter of a multipart content type, or null. */
+    private static String boundaryOf(String contentType) {
+        String lower = contentType.toLowerCase();
+        int index = lower.indexOf("boundary=");
+        if (index < 0) {
+            return null;
+        }
+        String value = contentType.substring(index + "boundary=".length()).trim();
+        int semicolon = value.indexOf(';');
+        if (semicolon >= 0) {
+            value = value.substring(0, semicolon).trim();
+        }
+        if (value.length() >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
+            value = value.substring(1, value.length() - 1);
+        }
+        return value;
+    }
+
+    /** @return the filename of a part, or an empty string when it has none. */
+    private static String filenameOf(String partHeaders) {
+        Matcher matcher = Pattern.compile("filename=\"([^\"]*)\"").matcher(partHeaders);
+        String name;
+        if (matcher.find()) {
+            name = matcher.group(1);
+        } else {
+            matcher = Pattern.compile("filename=([^;\r\n]*)").matcher(partHeaders);
+            name = matcher.find() ? matcher.group(1).trim() : "";
+        }
+        return fixMojibake(name);
+    }
+
+    /**
+     * The part headers were read as ISO-8859-1 so byte offsets stay exact, which turns a UTF-8
+     * filename (browsers send Chinese names that way) into mojibake. Round-tripping the same bytes
+     * back through UTF-8 restores it; a pure ASCII name is unaffected.
+     */
+    private static String fixMojibake(String value) {
+        if (value == null || value.isEmpty()) {
+            return "";
+        }
+        boolean ascii = true;
+        for (int i = 0; i < value.length(); i++) {
+            if (value.charAt(i) > 0x7F) {
+                ascii = false;
+                break;
+            }
+        }
+        if (ascii) {
+            return value;
+        }
+        return new String(value.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1),
+                java.nio.charset.StandardCharsets.UTF_8);
+    }
+
     private static Map<String, String> parseFormData(String body) {
         Map<String, String> params = new HashMap<>();
         try {
@@ -625,6 +784,10 @@ public class ConfigWebServer {
                 "            <div id=\"m3uStatus\" class=\"status\"></div>\n" +
                 "            <div id=\"m3uFileInfo\" class=\"info\"></div>\n" +
                 "            <div id=\"m3uDropDirInfo\" class=\"info\"></div>\n" +
+                "            <label for=\"m3uUploadInput\" style=\"margin-top:12px;\">从本机上传 M3U 文件（手机 / 电脑选择）:</label>\n" +
+                "            <input type=\"file\" id=\"m3uUploadInput\" accept=\".m3u,.m3u8,.txt,text/plain\" style=\"margin-bottom:12px;\">\n" +
+                "            <button onclick=\"uploadM3uFile()\">上传并启用</button>\n" +
+                "            <div id=\"uploadStatus\" class=\"status\"></div>\n" +
                 "            <button id=\"clearM3uFileBtn\" onclick=\"clearM3uFile()\" style=\"display:none;\">清除本地文件</button>\n" +
                 "            <div id=\"m3uFileStatus\" class=\"status\"></div>\n" +
                 "        </div>\n" +
@@ -763,6 +926,28 @@ public class ConfigWebServer {
                 "                document.getElementById('m3uFileStatus').className = 'status error';\n" +
                 "                document.getElementById('m3uFileStatus').textContent = '✗ 网络错误: ' + e;\n" +
                 "            });\n" +
+                "        }\n" +
+                "        function uploadM3uFile() {\n" +
+                "            const input = document.getElementById('m3uUploadInput');\n" +
+                "            if (!input.files || !input.files.length) { alert('请先选择文件'); return; }\n" +
+                "            const status = document.getElementById('uploadStatus');\n" +
+                "            status.className = 'status';\n" +
+                "            status.textContent = '上传中…';\n" +
+                "            status.style.display = 'block';\n" +
+                "            const form = new FormData();\n" +
+                "            form.append('file', input.files[0]);\n" +
+                "            fetch('/config/m3u-file-upload', {method: 'POST', body: form})\n" +
+                "                .then(r => r.json()).then(d => {\n" +
+                "                    status.className = 'status ' + (d.success ? 'success' : 'error');\n" +
+                "                    status.textContent = (d.success ? '✓ ' : '✗ ') + d.message + (d.success ? '（电视端已重新加载）' : '');\n" +
+                "                    if (d.success) {\n" +
+                "                        document.getElementById('m3uFileInfo').textContent = '本地 M3U 文件生效: ' + input.files[0].name;\n" +
+                "                        document.getElementById('clearM3uFileBtn').style.display = 'block';\n" +
+                "                    }\n" +
+                "                }).catch(e => {\n" +
+                "                    status.className = 'status error';\n" +
+                "                    status.textContent = '✗ 上传失败: ' + e;\n" +
+                "                });\n" +
                 "        }\n" +
                 "        function savePlayback() {\n" +
                 "            const body = 'video_render_mode=' + encodeURIComponent(document.getElementById('videoRenderMode').value)\n" +

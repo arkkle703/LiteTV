@@ -439,11 +439,11 @@ public class SettingsActivity extends Activity {
      */
     private String copyStreamToPlaylist(InputStream in) throws IOException {
         mLastFilePickError = 0;
-        File dir = new File(getFilesDir(), "playlists");
-        if (!dir.exists() && !dir.mkdirs()) {
+        File target = LocalPlaylistFolder.playlistSlot(this);
+        File dir = target.getParentFile();
+        if (dir != null && !dir.exists() && !dir.mkdirs()) {
             return null;
         }
-        File target = new File(dir, "local.m3u");
         OutputStream out = new FileOutputStream(target);
         try {
             byte[] buffer = new byte[8192];
