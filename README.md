@@ -2,7 +2,7 @@
 
 [![GitHub Release](https://img.shields.io/github/v/release/vibe4free/LiteTV?label=Latest%20Release)](https://github.com/vibe4free/LiteTV/releases)
 ![Platform](https://img.shields.io/badge/Platform-Android%20TV%205.1%2B%20(API%2021%2B)-4CAF50)
-![Player](https://img.shields.io/badge/Player-ExoPlayer%202.19.1-orange)
+![Player](https://img.shields.io/badge/Player-Media3%201.4.1-orange)
 ![APK](https://img.shields.io/badge/APK-~9%20MB-lightgrey)
 ![minSdk](https://img.shields.io/badge/minSdk-21-blue)
 
@@ -10,7 +10,7 @@
 
 一款为 Android TV 遥控器深度优化的**通用 IPTV 直播播放器（空壳应用）**。自身不含任何直播源，配置你的 M3U 直播源地址后即可使用；支持 **EPG 电子节目单**、**频道分组与收藏**、**内置 Web 远程配置服务器**。
 
-> 轻量设计：仅 ExoPlayer + HTTP，无 ijkplayer、无 P2P、无广告，APK 约 9 MB。
+> 轻量设计：仅 Media3 (ExoPlayer) + HTTP，无 ijkplayer、无 P2P、无广告，APK 约 9 MB。
 
 ---
 
@@ -150,7 +150,7 @@ adb install -r LiteTV-vX.Y.Z.apk
 本项目在开发与测试过程中受到以下开源项目的启发与帮助：
 
 - [**rtp2httpd**](https://github.com/stackia/rtp2httpd) — RTP 流转 HTTP 工具，项目的直播源思路与测试基础
-- [**ExoPlayer**](https://github.com/google/exoplayer) — 强大的 Android 媒体播放器框架，本项目的播放核心
+- [**ExoPlayer / AndroidX Media3**](https://github.com/androidx/media) — 强大的 Android 媒体播放器框架，本项目的播放核心（Media3 1.4.1，仍是支持 minSdk 21 的版本线）
 
 ---
 

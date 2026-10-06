@@ -3,8 +3,8 @@ package com.cabletv.player.player;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.fail;
 
-import com.google.android.exoplayer2.DefaultLoadControl;
-import com.google.android.exoplayer2.LoadControl;
+import androidx.media3.exoplayer.DefaultLoadControl;
+import androidx.media3.exoplayer.LoadControl;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;

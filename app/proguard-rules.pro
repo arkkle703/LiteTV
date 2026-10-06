@@ -45,9 +45,9 @@
 -keep class * implements xyz.doikki.videoplayer.player.PlayerFactory { *; }
 -keep class * implements xyz.doikki.videoplayer.render.RenderViewFactory { *; }
 
-# ExoPlayer and Glide ship their own consumer rules in their AARs; only the
+# Media3 and Glide ship their own consumer rules in their AARs; only the
 # optional/absent integrations need silencing here.
--dontwarn com.google.android.exoplayer2.ext.**
+-dontwarn androidx.media3.ext.**
 -dontwarn okhttp3.**
 -dontwarn okio.**
 
