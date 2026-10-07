@@ -20,6 +20,16 @@
     <uses-permission
         android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
+    <!--
+        Sideloaded apps cannot rely on a store to deliver updates, so LiteTV installs its own
+        releases. Requesting the install permission is what lets the system package installer be
+        invoked for the APK we downloaded; without it the install intent is silently dropped on
+        Android 8+. Play restricts this permission to apps whose core purpose is installing
+        packages, but that policy only applies to Play-distributed apps and LiteTV ships APKs on
+        GitHub Releases. On Android 8+ the permission is also gated per app by the system
+        ("install unknown apps"), which the updater checks before starting a download.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".App"

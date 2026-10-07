@@ -2,17 +2,20 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.github.tvbox.osc.player">
 
+    <!--
+        Only what the player library itself touches. The doikki fork used to carry a pile of
+        legacy permissions that nothing in this codebase ever exercised:
+        READ_PHONE_STATE / GET_TASKS / ACCESS_FINE_LOCATION / WRITE_EXTERNAL_STORAGE /
+        READ_EXTERNAL_STORAGE / CHANGE_WIFI_MULTICAST_STATE / WAKE_LOCK. Verified unused before
+        removal: the only TelephonyManager use is NETWORK_TYPE_* constants (no permission),
+        keep-screen-on goes through View.setKeepScreenOn (no permission), nothing calls
+        setWakeMode, and no code reads the external storage tree. Keeping them would only inflate
+        the permission list users see at install time, which is exactly what scares people off a
+        sideloaded IPTV player. REQUEST_INSTALL_PACKAGES now lives in the app manifest, where the
+        self-updater that needs it is implemented.
+    -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
-    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.GET_TASKS" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!--    <application-->
     <!--        android:allowBackup="true"-->
