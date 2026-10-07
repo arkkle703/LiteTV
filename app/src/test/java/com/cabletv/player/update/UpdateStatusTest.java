@@ -43,7 +43,26 @@ public class UpdateStatusTest {
     }
 
     @Test
+    public void installTransitions_keepTheVerifiedFile() {
+        File apk = new File("/tmp/update.apk");
+        UpdateStatus ready = available().withProgress(1000L, 1000L).toReady(apk);
+
+        assertEquals(UpdateState.INSTALLING, ready.toInstalling().state);
+        assertEquals("the installer needs the file it was handed", apk, ready.toInstalling().apkFile);
+
+        UpdateStatus needsPermission = ready.toNeedsPermission();
+        assertEquals(UpdateState.NEEDS_PERMISSION, needsPermission.state);
+        assertEquals("granting the permission must not require a re-download", apk, needsPermission.apkFile);
+
+        UpdateStatus refused = ready.readyAgain(UpdateError.INSTALL_BLOCKED);
+        assertEquals("a blocked install leaves the verified file in place", UpdateState.READY, refused.state);
+        assertEquals(apk, refused.apkFile);
+        assertEquals(UpdateError.INSTALL_BLOCKED, refused.error);
+    }
+
+    @Test
     public void withProgress_keepsTheManifestAndTheApkChoice() {
+        assertFalse(UpdateStatus.idle().isUpdateAvailable());
         UpdateStatus status = available().withProgress(250L, 1000L);
         assertEquals(UpdateState.DOWNLOADING, status.state);
         assertNotNull("a download must not forget which build it is fetching", status.variant);

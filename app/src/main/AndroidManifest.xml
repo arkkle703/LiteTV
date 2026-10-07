@@ -59,6 +59,21 @@
             android:exported="false"
             android:screenOrientation="landscape" />
 
+        <!--
+            Shares the downloaded APK with the system installer. The installer is a different app, so
+            a file:// URI would be rejected on Android 7+ (FileUriExposedException) and the download
+            would be unreachable; a content:// URI with a one-shot read grant is the supported path.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
     </application>
 
 </manifest>

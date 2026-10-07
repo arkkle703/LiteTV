@@ -121,7 +121,16 @@ public class UpdateManager {
 
     private void runCheck(Context appContext) {
         publish(UpdateStatus.checking());
-        UpdateStatus status = mChecker.check(AppVersion.code(appContext), android.os.Build.SUPPORTED_ABIS);
+        UpdateStatus status;
+        try {
+            status = mChecker.check(AppVersion.code(appContext), android.os.Build.SUPPORTED_ABIS);
+        } catch (RuntimeException e) {
+            // The updater runs on its own thread, and an exception there would otherwise take the
+            // whole process down (the default handler terminates the app). A failed check is a
+            // status, not a crash.
+            Log.e(TAG, "Update check threw", e);
+            status = UpdateStatus.error(UpdateError.UNKNOWN, System.currentTimeMillis());
+        }
         // Stamp the attempt even when it failed: a failing check must not retry on every launch.
         AppConfig.setUpdateLastCheckMs(System.currentTimeMillis());
         AppConfig.setUpdateLastError(status.error == UpdateError.NONE ? "" : status.error.name());
@@ -173,8 +182,7 @@ public class UpdateManager {
 
     private void runDownload(Context context, UpdateManifest.Variant variant, int expectedVersionCode) {
         UpdateStatus before = mStatus;
-        try {
-            File apk = mDownloader.download(context, variant.url, variant.size, variant.sha256,
+        try {            File apk = mDownloader.download(context, variant.url, variant.size, variant.sha256,
                     this::publishProgress, mCancelDownload);
             ApkVerifier.Result result = ApkVerifier.verify(context, apk, expectedVersionCode);
             if (result != ApkVerifier.Result.OK) {
@@ -194,6 +202,10 @@ public class UpdateManager {
                 return;
             }
             fail(before, e.error);
+        } catch (RuntimeException e) {
+            // Same reasoning as the check: a broken download must not kill the app.
+            Log.e(TAG, "Download threw", e);
+            fail(before, UpdateError.UNKNOWN);
         }
     }
 
@@ -207,6 +219,46 @@ public class UpdateManager {
     private void fail(UpdateStatus before, UpdateError error) {
         AppConfig.setUpdateLastError(error.name());
         publish(before.toError(error));
+    }
+
+    // --- Install ---------------------------------------------------------------------------
+
+    /**
+     * Hands the verified APK to the system installer. Android shows its own confirmation; this only
+     * decides whether we are allowed to ask, and then reports whatever the installer says back.
+     */
+    public void installUpdate(Context context) {
+        UpdateStatus current = mStatus;
+        if (current.apkFile == null) {
+            Log.w(TAG, "Ignoring an install request without a verified APK");
+            return;
+        }
+        if (!ApkInstaller.canRequestInstall(context)) {
+            // Nothing is downloaded twice and nothing is lost: the file is verified and waiting.
+            publish(current.toNeedsPermission());
+            return;
+        }
+        publish(current.toInstalling());
+        ApkInstaller.install(context, current.apkFile, this::onInstallStatus);
+    }
+
+    private void onInstallStatus(ApkInstaller.InstallStatus status) {
+        UpdateStatus current = mStatus;
+        switch (status) {
+            case FAILED:
+                UpdateError error = ApkInstaller.lastError();
+                Log.w(TAG, "Install failed: " + error);
+                AppConfig.setUpdateLastError(error.name());
+                publish(current.readyAgain(error));
+                break;
+            case SUCCEEDED:
+                Log.i(TAG, "Update installed; the system restarts the app");
+                publish(current.readyAgain(UpdateError.NONE));
+                break;
+            default:
+                // PENDING_USER_ACTION and HANDED_OVER both mean "waiting on the installer".
+                break;
+        }
     }
 
     private static UpdateError errorFor(ApkVerifier.Result result) {

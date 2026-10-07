@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Paths the self-updater is allowed to hand to the system installer. The APK is downloaded into
+    the cache (external cache when the device has one, internal otherwise), and both are listed so
+    the URI works whichever one was used. Nothing outside these directories can be shared.
+-->
+<paths>
+    <cache-path name="internal_cache" path="." />
+    <external-cache-path name="external_cache" path="." />
+</paths>

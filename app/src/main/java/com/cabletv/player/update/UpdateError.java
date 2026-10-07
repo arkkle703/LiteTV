@@ -29,5 +29,9 @@ public enum UpdateError {
     CANCELLED,
     /** The downloaded file could not be written (no space, read-only cache). */
     STORAGE,
+    /** Android refused the install: installs from this app are not allowed yet. */
+    INSTALL_BLOCKED,
+    /** The system installer reported a failure (see the log for its own message). */
+    INSTALL_FAILED,
     UNKNOWN
 }

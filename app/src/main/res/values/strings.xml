@@ -139,4 +139,15 @@
     <string name="update_error_signature">The download is not signed like this app and was rejected</string>
     <string name="update_error_cancelled">Download cancelled</string>
     <string name="update_error_storage">Cannot write the download: storage problem</string>
+    <string name="update_install">Install now</string>
+    <string name="update_installing">Waiting for the installer…</string>
+    <string name="update_permission_needed">Android needs your permission before this app can install an update</string>
+    <string name="update_permission_title">Allow LiteTV to install updates</string>
+    <string name="update_permission_message">Android blocks apps from installing updates until you allow it. Open the setting, turn on "Allow from this source" for LiteTV, then come back and press Install now.\n\nSome televisions hide that screen. In that case the update can also be applied with ADB, or by copying the APK to a USB drive.</string>
+    <string name="update_permission_open">Open settings</string>
+    <string name="update_permission_adb_button">ADB hint</string>
+    <string name="update_permission_adb">adb shell appops set com.cabletv.player REQUEST_INSTALL_PACKAGES allow</string>
+    <string name="update_error_install_blocked">Android blocked the install; allow LiteTV to install updates</string>
+    <string name="update_error_install_failed">The installer refused the update; see the log for its message</string>
+    <string name="update_installing_button">Installing…</string>
 </resources>

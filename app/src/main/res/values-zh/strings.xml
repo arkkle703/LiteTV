@@ -139,4 +139,15 @@
     <string name="update_error_signature">下载包签名与本应用不一致，已拒绝</string>
     <string name="update_error_cancelled">已取消下载</string>
     <string name="update_error_storage">无法写入下载文件：存储异常</string>
+    <string name="update_install">立即安装</string>
+    <string name="update_installing">等待安装器…</string>
+    <string name="update_permission_needed">系统需要你先允许本应用安装更新</string>
+    <string name="update_permission_title">允许 LiteTV 安装更新</string>
+    <string name="update_permission_message">在允许之前，Android 会阻止应用自行安装更新。请打开设置，为 LiteTV 开启“允许来自此来源”，然后返回并点击“立即安装”。\n\n部分电视隐藏了该设置页，此时也可以用 ADB 安装，或把安装包拷到 U 盘手动安装。</string>
+    <string name="update_permission_open">打开设置</string>
+    <string name="update_permission_adb_button">ADB 方式</string>
+    <string name="update_permission_adb">adb shell appops set com.cabletv.player REQUEST_INSTALL_PACKAGES allow</string>
+    <string name="update_error_install_blocked">系统阻止了安装：请允许 LiteTV 安装更新</string>
+    <string name="update_error_install_failed">安装器拒绝了更新，详细原因见日志</string>
+    <string name="update_installing_button">安装中…</string>
 </resources>

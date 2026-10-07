@@ -22,6 +22,7 @@ import android.widget.Toast;
 import com.cabletv.player.R;
 import com.cabletv.player.config.AppConfig;
 import com.cabletv.player.server.ConfigWebServer;
+import com.cabletv.player.update.ApkInstaller;
 import com.cabletv.player.update.AppVersion;
 import com.cabletv.player.update.UpdateError;
 import com.cabletv.player.update.UpdateManager;
@@ -436,8 +437,16 @@ public class SettingsActivity extends Activity implements UpdateManager.Listener
                 mUpdateActionButton.setText(R.string.update_cancel_download);
                 break;
             case READY:
+                mUpdateActionButton.setEnabled(true);
+                mUpdateActionButton.setText(R.string.update_install);
+                break;
+            case INSTALLING:
                 mUpdateActionButton.setEnabled(false);
-                mUpdateActionButton.setText(R.string.update_ready);
+                mUpdateActionButton.setText(R.string.update_installing_button);
+                break;
+            case NEEDS_PERMISSION:
+                mUpdateActionButton.setEnabled(true);
+                mUpdateActionButton.setText(R.string.update_permission_open);
                 break;
             default:
                 mUpdateActionButton.setEnabled(true);
@@ -455,9 +464,50 @@ public class SettingsActivity extends Activity implements UpdateManager.Listener
             case DOWNLOADING:
                 UpdateManager.get().cancelDownload();
                 break;
+            case READY:
+                UpdateManager.get().installUpdate(this);
+                break;
+            case NEEDS_PERMISSION:
+                showInstallPermissionHelp();
+                break;
             default:
                 UpdateManager.get().checkNow(this);
                 break;
+        }
+    }
+
+    /**
+     * Android 8 and newer require the user to allow installs from this app, and on some televisions
+     * the screen for that is missing or greyed out. Rather than dead-ending, offer the system screen
+     * when it exists and the documented ways out when it does not.
+     */
+    private void showInstallPermissionHelp() {
+        Intent permission = ApkInstaller.permissionIntent(this);
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.update_permission_title)
+                .setMessage(R.string.update_permission_message)
+                .setPositiveButton(R.string.update_permission_open,
+                        (dialog, which) -> openSystemSettings(permission))
+                .setNeutralButton(R.string.update_permission_adb_button,
+                        (dialog, which) -> Toast.makeText(this, R.string.update_permission_adb,
+                                Toast.LENGTH_LONG).show())
+                .setNegativeButton(R.string.exit_cancel, null)
+                .create()
+                .show();
+    }
+
+    private void openSystemSettings(Intent preferred) {
+        Intent intent = preferred != null ? preferred : ApkInstaller.appDetailsIntent(this);
+        try {
+            startActivity(intent);
+        } catch (Exception e) {
+            // The specific screen may not exist on this firmware; the app's own page usually does.
+            Log.w(TAG, "Cannot open " + intent, e);
+            try {
+                startActivity(ApkInstaller.appDetailsIntent(this));
+            } catch (Exception nested) {
+                Toast.makeText(this, R.string.update_permission_adb, Toast.LENGTH_LONG).show();
+            }
         }
     }
 
@@ -476,7 +526,14 @@ public class SettingsActivity extends Activity implements UpdateManager.Listener
                 return getString(R.string.update_downloading,
                         Math.round(status.progressFraction() * 100f));
             case READY:
-                return getString(R.string.update_ready);
+                // A failed install leaves the verified file in place, so show why it stopped.
+                return status.error != UpdateError.NONE
+                        ? updateErrorText(status.error)
+                        : getString(R.string.update_ready);
+            case INSTALLING:
+                return getString(R.string.update_installing);
+            case NEEDS_PERMISSION:
+                return getString(R.string.update_permission_needed);
             case ERROR:
                 return updateErrorText(status.error);
             default:
@@ -505,6 +562,10 @@ public class SettingsActivity extends Activity implements UpdateManager.Listener
                 return getString(R.string.update_error_cancelled);
             case STORAGE:
                 return getString(R.string.update_error_storage);
+            case INSTALL_BLOCKED:
+                return getString(R.string.update_error_install_blocked);
+            case INSTALL_FAILED:
+                return getString(R.string.update_error_install_failed);
             default:
                 return getString(R.string.update_error_unknown);
         }

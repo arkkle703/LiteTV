@@ -59,6 +59,11 @@ public class UpdateStringsTest {
                 R.string.update_download, R.string.update_cancel_download, R.string.update_ready,
                 R.string.update_error_checksum, R.string.update_error_signature,
                 R.string.update_error_cancelled, R.string.update_error_storage,
+                R.string.update_install, R.string.update_installing, R.string.update_ready,
+                R.string.update_permission_needed, R.string.update_permission_open,
+                R.string.update_permission_title, R.string.update_permission_message,
+                R.string.update_permission_adb, R.string.update_permission_adb_button,
+                R.string.update_error_install_blocked, R.string.update_error_install_failed,
         };
         for (int id : ids) {
             assertFalse("missing text for string id " + id, context.getString(id).trim().isEmpty());

@@ -107,6 +107,27 @@ public final class UpdateStatus {
                 reason, manifest, variant, downloadedBytes, totalBytes, null, checkedAtMs);
     }
 
+    /** The verified APK is being handed to the system installer. */
+    public UpdateStatus toInstalling() {
+        return new UpdateStatus(UpdateState.INSTALLING, UpdateError.NONE, manifest, variant,
+                totalBytes, totalBytes, apkFile, checkedAtMs);
+    }
+
+    /** Android wants the user to allow installs from this app before anything can happen. */
+    public UpdateStatus toNeedsPermission() {
+        return new UpdateStatus(UpdateState.NEEDS_PERMISSION, UpdateError.NONE, manifest, variant,
+                totalBytes, totalBytes, apkFile, checkedAtMs);
+    }
+
+    /**
+     * The verified APK is still on disk, so the offer to install stays; only the reason the last
+     * attempt stopped is recorded.
+     */
+    public UpdateStatus readyAgain(UpdateError reason) {
+        return new UpdateStatus(UpdateState.READY, reason, manifest, variant,
+                totalBytes, totalBytes, apkFile, checkedAtMs);
+    }
+
     /** Fraction downloaded, 0..1, or 0 when the total is unknown. */
     public float progressFraction() {
         if (totalBytes <= 0L) {

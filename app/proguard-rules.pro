@@ -36,6 +36,14 @@
 -keep class com.cabletv.player.model.** { *; }
 -keep class com.cabletv.player.epg.EpgManager$Program { *; }
 
+# The release manifest is read with Gson and its field names ARE the JSON keys,
+# so the class has to survive obfuscation completely. Release builds crashed
+# without this ("Unable to invoke no-args constructor for class ... Abstract
+# class can't be instantiated"), which took the whole app down on the first
+# update check -- only a minified build shows it, unit tests run unminified.
+-keep class com.cabletv.player.update.UpdateManifest { *; }
+-keep class com.cabletv.player.update.UpdateManifest$Variant { *; }
+
 # ---------------------------------------------------------------------------
 # Player module (DKPlayer). Instantiated from XML layouts and via factories;
 # the util classes reflect on platform/vendor classes by name.

@@ -39,7 +39,10 @@ public class UpdateChecker {
         UpdateManifest manifest;
         try {
             manifest = UpdateManifest.parse(json);
-        } catch (IllegalArgumentException e) {
+        } catch (RuntimeException e) {
+            // Covers malformed JSON and, deliberately, anything the parser throws while building
+            // the object: a manifest we cannot read is a parse failure, never a crash. Release
+            // builds once died here because R8 had made the model class uninstantiable.
             return UpdateStatus.error(UpdateError.PARSE, now);
         }
 
