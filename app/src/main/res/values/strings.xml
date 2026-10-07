@@ -131,4 +131,12 @@
     <string name="update_error_parse">Check failed: the update information is not usable</string>
     <string name="update_error_no_build">No build matches this device\'s CPU</string>
     <string name="update_error_unknown">Check failed</string>
+    <string name="update_download">Download update</string>
+    <string name="update_downloading">Downloading… %1$d%%</string>
+    <string name="update_cancel_download">Cancel download</string>
+    <string name="update_ready">Downloaded and verified</string>
+    <string name="update_error_checksum">The download does not match the release and was deleted</string>
+    <string name="update_error_signature">The download is not signed like this app and was rejected</string>
+    <string name="update_error_cancelled">Download cancelled</string>
+    <string name="update_error_storage">Cannot write the download: storage problem</string>
 </resources>

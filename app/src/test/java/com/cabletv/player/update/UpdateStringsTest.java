@@ -56,9 +56,16 @@ public class UpdateStringsTest {
                 R.string.update_error_network, R.string.update_error_http,
                 R.string.update_error_no_manifest, R.string.update_error_parse,
                 R.string.update_error_no_build, R.string.update_error_unknown,
+                R.string.update_download, R.string.update_cancel_download, R.string.update_ready,
+                R.string.update_error_checksum, R.string.update_error_signature,
+                R.string.update_error_cancelled, R.string.update_error_storage,
         };
         for (int id : ids) {
             assertFalse("missing text for string id " + id, context.getString(id).trim().isEmpty());
         }
+
+        String downloading = context.getString(R.string.update_downloading, 45);
+        assertTrue("the progress line must show the percentage: " + downloading,
+                downloading.contains("45"));
     }
 }

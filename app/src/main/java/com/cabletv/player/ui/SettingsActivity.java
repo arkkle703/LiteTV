@@ -65,6 +65,7 @@ public class SettingsActivity extends Activity implements UpdateManager.Listener
     private TextView mUpdateStatusText;
     private TextView mUpdateChangelogText;
     private TextView mUpdateLastCheckText;
+    private Button mUpdateActionButton;
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
@@ -97,13 +98,13 @@ public class SettingsActivity extends Activity implements UpdateManager.Listener
         mUpdateStatusText = findViewById(R.id.update_status_text);
         mUpdateChangelogText = findViewById(R.id.update_changelog_text);
         mUpdateLastCheckText = findViewById(R.id.update_last_check_text);
+        mUpdateActionButton = findViewById(R.id.check_update_btn);
 
         Button saveM3uBtn = findViewById(R.id.save_m3u_btn);
         Button saveEpgBtn = findViewById(R.id.save_epg_btn);
         Button pickM3uFileBtn = findViewById(R.id.pick_m3u_file_btn);
         Button scanM3uFileBtn = findViewById(R.id.scan_m3u_file_btn);
         Button clearM3uFileBtn = findViewById(R.id.clear_m3u_file_btn);
-        Button checkUpdateBtn = findViewById(R.id.check_update_btn);
 
         // Find or create EPG display toggle
         try {
@@ -125,7 +126,7 @@ public class SettingsActivity extends Activity implements UpdateManager.Listener
         scanM3uFileBtn.setOnClickListener(v -> showFolderImportDialog());
         clearM3uFileBtn.setOnClickListener(v -> clearM3uFile());
         mWebServerToggle.setOnCheckedChangeListener((btn, isChecked) -> handleWebServerToggle(isChecked));
-        checkUpdateBtn.setOnClickListener(v -> UpdateManager.get().checkNow(this));
+        mUpdateActionButton.setOnClickListener(v -> handleUpdateAction());
         mUpdateAutoCheckToggle.setOnCheckedChangeListener((btn, isChecked) -> {
             AppConfig.setUpdateAutoCheckEnabled(isChecked);
             Toast.makeText(this, isChecked ? R.string.update_auto_check_on : R.string.update_auto_check_off,
@@ -416,7 +417,48 @@ public class SettingsActivity extends Activity implements UpdateManager.Listener
         } else {
             mUpdateChangelogText.setVisibility(View.GONE);
         }
+        renderUpdateAction(status);
         renderLastCheck();
+    }
+
+    /**
+     * One button whose meaning follows the state, which is what a remote needs: the focused control
+     * always says what pressing OK will do.
+     */
+    private void renderUpdateAction(UpdateStatus status) {
+        switch (status.state) {
+            case UPDATE_AVAILABLE:
+                mUpdateActionButton.setEnabled(true);
+                mUpdateActionButton.setText(R.string.update_download);
+                break;
+            case DOWNLOADING:
+                mUpdateActionButton.setEnabled(true);
+                mUpdateActionButton.setText(R.string.update_cancel_download);
+                break;
+            case READY:
+                mUpdateActionButton.setEnabled(false);
+                mUpdateActionButton.setText(R.string.update_ready);
+                break;
+            default:
+                mUpdateActionButton.setEnabled(true);
+                mUpdateActionButton.setText(R.string.update_check_now);
+                break;
+        }
+    }
+
+    private void handleUpdateAction() {
+        UpdateStatus status = UpdateManager.get().getStatus();
+        switch (status.state) {
+            case UPDATE_AVAILABLE:
+                UpdateManager.get().downloadUpdate(this);
+                break;
+            case DOWNLOADING:
+                UpdateManager.get().cancelDownload();
+                break;
+            default:
+                UpdateManager.get().checkNow(this);
+                break;
+        }
     }
 
     private CharSequence statusText(UpdateStatus status) {
@@ -426,7 +468,15 @@ public class SettingsActivity extends Activity implements UpdateManager.Listener
             case UP_TO_DATE:
                 return getString(R.string.update_up_to_date);
             case UPDATE_AVAILABLE:
-                return getString(R.string.update_available, status.latestVersionName);
+                // A cancelled or failed download leaves the update on offer, with the reason shown.
+                return status.error != UpdateError.NONE
+                        ? updateErrorText(status.error)
+                        : getString(R.string.update_available, status.latestVersionName);
+            case DOWNLOADING:
+                return getString(R.string.update_downloading,
+                        Math.round(status.progressFraction() * 100f));
+            case READY:
+                return getString(R.string.update_ready);
             case ERROR:
                 return updateErrorText(status.error);
             default:
@@ -447,6 +497,14 @@ public class SettingsActivity extends Activity implements UpdateManager.Listener
                 return getString(R.string.update_error_parse);
             case NO_BUILD_FOR_DEVICE:
                 return getString(R.string.update_error_no_build);
+            case CHECKSUM:
+                return getString(R.string.update_error_checksum);
+            case SIGNATURE:
+                return getString(R.string.update_error_signature);
+            case CANCELLED:
+                return getString(R.string.update_error_cancelled);
+            case STORAGE:
+                return getString(R.string.update_error_storage);
             default:
                 return getString(R.string.update_error_unknown);
         }

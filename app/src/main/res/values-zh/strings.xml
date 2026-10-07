@@ -131,4 +131,12 @@
     <string name="update_error_parse">检查失败：更新信息不可用</string>
     <string name="update_error_no_build">没有适配本机 CPU 的安装包</string>
     <string name="update_error_unknown">检查失败</string>
+    <string name="update_download">下载更新</string>
+    <string name="update_downloading">正在下载… %1$d%%</string>
+    <string name="update_cancel_download">取消下载</string>
+    <string name="update_ready">已下载并校验通过</string>
+    <string name="update_error_checksum">下载文件与发布不一致，已删除</string>
+    <string name="update_error_signature">下载包签名与本应用不一致，已拒绝</string>
+    <string name="update_error_cancelled">已取消下载</string>
+    <string name="update_error_storage">无法写入下载文件：存储异常</string>
 </resources>

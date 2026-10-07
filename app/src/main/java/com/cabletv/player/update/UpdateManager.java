@@ -7,10 +7,12 @@ import android.util.Log;
 
 import com.cabletv.player.config.AppConfig;
 
+import java.io.File;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * The one place that knows how to check for updates. A single long-lived instance owns the current
@@ -37,12 +39,19 @@ public class UpdateManager {
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
     private final List<Listener> mListeners = new CopyOnWriteArrayList<>();
     private final UpdateChecker mChecker;
+    private final UpdateDownloader mDownloader;
+    private final AtomicBoolean mCancelDownload = new AtomicBoolean(false);
 
     private volatile UpdateStatus mStatus = UpdateStatus.idle();
 
     /** Visible for tests, which inject a checker backed by a stub fetcher. */
     UpdateManager(UpdateChecker checker) {
+        this(checker, new UpdateDownloader());
+    }
+
+    UpdateManager(UpdateChecker checker, UpdateDownloader downloader) {
         mChecker = checker;
+        mDownloader = downloader;
         mExecutor = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "update");
             thread.setDaemon(true);
@@ -135,5 +144,79 @@ public class UpdateManager {
                 listener.onUpdateStatusChanged(status);
             }
         });
+    }
+
+    // --- Download -------------------------------------------------------------------------
+
+    /**
+     * Fetches and verifies the APK for the update that was just found. Nothing is installed from
+     * here; the caller decides when to hand the verified file to the system installer.
+     */
+    public void downloadUpdate(Context context) {
+        UpdateStatus current = mStatus;
+        if (!current.isUpdateAvailable()) {
+            Log.w(TAG, "Ignoring a download request without a known update");
+            return;
+        }
+        final Context appContext = context.getApplicationContext();
+        final UpdateManifest.Variant variant = current.variant;
+        final int expectedVersionCode = current.latestVersionCode;
+        mCancelDownload.set(false);
+        publish(current.withProgress(0L, variant.size));
+        mExecutor.execute(() -> runDownload(appContext, variant, expectedVersionCode));
+    }
+
+    /** Stops the running download; the partial file is kept so a retry resumes. */
+    public void cancelDownload() {
+        mCancelDownload.set(true);
+    }
+
+    private void runDownload(Context context, UpdateManifest.Variant variant, int expectedVersionCode) {
+        UpdateStatus before = mStatus;
+        try {
+            File apk = mDownloader.download(context, variant.url, variant.size, variant.sha256,
+                    this::publishProgress, mCancelDownload);
+            ApkVerifier.Result result = ApkVerifier.verify(context, apk, expectedVersionCode);
+            if (result != ApkVerifier.Result.OK) {
+                UpdateDownloader.clear(context);
+                Log.w(TAG, "Rejected the downloaded APK: " + result);
+                fail(before, errorFor(result));
+                return;
+            }
+            Log.i(TAG, "APK verified and ready to install: " + apk);
+            AppConfig.setUpdateLastError("");
+            publish(before.toReady(apk));
+        } catch (UpdateDownloader.DownloadException e) {
+            Log.w(TAG, "Download failed: " + e.error + " (" + e.getMessage() + ")");
+            if (e.error == UpdateError.CANCELLED) {
+                // Not a failure: the update is still on offer and the partial file is kept.
+                publish(before.backToAvailable(UpdateError.CANCELLED));
+                return;
+            }
+            fail(before, e.error);
+        }
+    }
+
+    private void publishProgress(long downloaded, long total) {
+        UpdateStatus current = mStatus;
+        if (current.state == UpdateState.DOWNLOADING) {
+            publish(current.withProgress(downloaded, total));
+        }
+    }
+
+    private void fail(UpdateStatus before, UpdateError error) {
+        AppConfig.setUpdateLastError(error.name());
+        publish(before.toError(error));
+    }
+
+    private static UpdateError errorFor(ApkVerifier.Result result) {
+        switch (result) {
+            case WRONG_SIGNATURE:
+            case WRONG_PACKAGE:
+            case WRONG_VERSION:
+                return UpdateError.SIGNATURE;
+            default:
+                return UpdateError.CHECKSUM;
+        }
     }
 }

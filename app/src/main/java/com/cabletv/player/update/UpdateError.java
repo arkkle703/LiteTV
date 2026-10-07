@@ -21,5 +21,13 @@ public enum UpdateError {
     PARSE,
     /** The manifest has no APK for this device's CPU architecture. */
     NO_BUILD_FOR_DEVICE,
+    /** The downloaded file does not match the size or checksum the manifest published. */
+    CHECKSUM,
+    /** The download does not belong to this app (package name, version or signing certificate). */
+    SIGNATURE,
+    /** The user cancelled the download. */
+    CANCELLED,
+    /** The downloaded file could not be written (no space, read-only cache). */
+    STORAGE,
     UNKNOWN
 }
