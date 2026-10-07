@@ -4,6 +4,7 @@ import android.app.Application;
 import android.util.Log;
 
 import com.cabletv.player.config.AppConfig;
+import com.cabletv.player.update.UpdateManager;
 import com.orhanobut.hawk.Hawk;
 
 import xyz.doikki.videoplayer.player.VideoViewConfig;
@@ -20,6 +21,8 @@ public class App extends Application {
         Hawk.init(this).build();
         applyPlayerConfiguration();
         setupExceptionHandler();
+        // Delayed and silent: it must not slow down the first channel nor pop anything on screen.
+        UpdateManager.get().scheduleStartupCheck(this);
     }
 
     /**

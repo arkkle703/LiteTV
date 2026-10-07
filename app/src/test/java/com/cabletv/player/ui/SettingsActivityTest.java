@@ -1,6 +1,7 @@
 package com.cabletv.player.ui;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
@@ -114,5 +115,23 @@ public class SettingsActivityTest {
         assertNotNull(activity.findViewById(R.id.pick_m3u_file_btn));
         assertNotNull(activity.findViewById(R.id.clear_m3u_file_btn));
         assertNotNull(activity.findViewById(R.id.m3u_file_path_text));
+    }
+
+    @Test
+    public void updateSection_showsVersionAndShipsAutoCheckOn() {
+        AppConfig.setUpdateAutoCheckEnabled(true);
+        SettingsActivity activity = buildActivity();
+
+        TextView version = activity.findViewById(R.id.app_version_text);
+        assertTrue("the installed version must be visible for support questions",
+                version.getText().toString().startsWith("LiteTV "));
+        assertTrue("automatic checks are on by default",
+                ((android.widget.CheckBox) activity.findViewById(R.id.update_auto_check_toggle)).isChecked());
+        assertEquals("nothing has been checked in a fresh install",
+                activity.getString(R.string.update_never_checked),
+                ((TextView) activity.findViewById(R.id.update_last_check_text)).getText().toString());
+
+        ((android.widget.CheckBox) activity.findViewById(R.id.update_auto_check_toggle)).setChecked(false);
+        assertFalse("turning the switch off must be stored", AppConfig.isUpdateAutoCheckEnabled());
     }
 }

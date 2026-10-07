@@ -110,4 +110,25 @@
     <string name="exit_confirm_message">Are you sure you want to exit?</string>
     <string name="exit_confirm">Confirm</string>
     <string name="exit_cancel">Cancel</string>
+
+    <!-- Self-update (checks GitHub Releases; the manifests are published per release) -->
+    <string name="update_section">About &amp; updates</string>
+    <string name="app_version_format">LiteTV %1$s (%2$d)</string>
+    <string name="update_auto_check">Check for updates automatically</string>
+    <string name="update_auto_check_on">Automatic update checks on</string>
+    <string name="update_auto_check_off">Automatic update checks off</string>
+    <string name="update_auto_check_hint">At most once a day, in the background. Updating is always up to you.</string>
+    <string name="update_check_now">Check now</string>
+    <string name="update_checking">Checking for updates…</string>
+    <string name="update_up_to_date">You have the latest version</string>
+    <string name="update_available">Version %1$s is available</string>
+    <string name="update_changelog_title">What\'s new</string>
+    <string name="update_last_check_format">Last checked: %1$s</string>
+    <string name="update_never_checked">Last checked: never</string>
+    <string name="update_error_network">Check failed: no network connection</string>
+    <string name="update_error_http">Check failed: GitHub returned an error</string>
+    <string name="update_error_no_manifest">No update information published for this release yet</string>
+    <string name="update_error_parse">Check failed: the update information is not usable</string>
+    <string name="update_error_no_build">No build matches this device\'s CPU</string>
+    <string name="update_error_unknown">Check failed</string>
 </resources>

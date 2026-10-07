@@ -26,6 +26,9 @@ public class AppConfig {
     private static final String VIDEO_RENDER_MODE_KEY = "app_video_render_mode";
     private static final String VIDEO_DECODE_MODE_KEY = "app_video_decode_mode";
     private static final String VIDEO_TUNNELING_KEY = "app_video_tunneling";
+    private static final String UPDATE_AUTO_CHECK_KEY = "app_update_auto_check";
+    private static final String UPDATE_LAST_CHECK_KEY = "app_update_last_check_ms";
+    private static final String UPDATE_LAST_ERROR_KEY = "app_update_last_error";
 
     private static final String DEFAULT_EPG_URL = "";
     /**
@@ -237,5 +240,37 @@ public class AppConfig {
 
     public static void setFavoriteChannels(List<String> names) {
         Hawk.put(FAVORITE_CHANNELS_KEY, new ArrayList<>(names));
+    }
+
+    // Self-update. The install itself is user-initiated; these keys only remember the user's
+    // preference and what the last automatic check found.
+    public static boolean isUpdateAutoCheckEnabled() {
+        return Hawk.get(UPDATE_AUTO_CHECK_KEY, true);  // Default: on, at most once a day
+    }
+
+    public static void setUpdateAutoCheckEnabled(boolean enabled) {
+        Hawk.put(UPDATE_AUTO_CHECK_KEY, enabled);
+    }
+
+    /** When the last check (automatic or manual) completed; 0 when never. */
+    public static long getUpdateLastCheckMs() {
+        return Hawk.get(UPDATE_LAST_CHECK_KEY, 0L);
+    }
+
+    public static void setUpdateLastCheckMs(long timeMs) {
+        Hawk.put(UPDATE_LAST_CHECK_KEY, timeMs);
+    }
+
+    /**
+     * Name of the last {@code UpdateError} ("" when the last check was clean). Stored as text so a
+     * later version can still read what an older one wrote, and so the web page can show a reason
+     * without a translation table of its own.
+     */
+    public static String getUpdateLastError() {
+        return Hawk.get(UPDATE_LAST_ERROR_KEY, "");
+    }
+
+    public static void setUpdateLastError(String error) {
+        Hawk.put(UPDATE_LAST_ERROR_KEY, error == null ? "" : error);
     }
 }

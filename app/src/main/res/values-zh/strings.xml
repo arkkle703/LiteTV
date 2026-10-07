@@ -110,4 +110,25 @@
     <string name="exit_confirm_message">确定要退出吗？</string>
     <string name="exit_confirm">同意</string>
     <string name="exit_cancel">取消</string>
+
+    <!-- 应用内自更新（从 GitHub Releases 检查，随发布提供 update.json） -->
+    <string name="update_section">关于 / 更新</string>
+    <string name="app_version_format">LiteTV %1$s (%2$d)</string>
+    <string name="update_auto_check">自动检查更新</string>
+    <string name="update_auto_check_on">已开启自动检查更新</string>
+    <string name="update_auto_check_off">已关闭自动检查更新</string>
+    <string name="update_auto_check_hint">每天最多后台检查一次；是否更新始终由你决定。</string>
+    <string name="update_check_now">立即检查</string>
+    <string name="update_checking">正在检查更新…</string>
+    <string name="update_up_to_date">已是最新版本</string>
+    <string name="update_available">发现新版本 %1$s</string>
+    <string name="update_changelog_title">更新内容</string>
+    <string name="update_last_check_format">上次检查：%1$s</string>
+    <string name="update_never_checked">上次检查：从未</string>
+    <string name="update_error_network">检查失败：网络不可用</string>
+    <string name="update_error_http">检查失败：GitHub 返回错误</string>
+    <string name="update_error_no_manifest">本版本尚未发布更新信息</string>
+    <string name="update_error_parse">检查失败：更新信息不可用</string>
+    <string name="update_error_no_build">没有适配本机 CPU 的安装包</string>
+    <string name="update_error_unknown">检查失败</string>
 </resources>

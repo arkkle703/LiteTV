@@ -11,6 +11,7 @@ import android.os.Bundle;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.Log;
+import android.view.View;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -21,6 +22,11 @@ import android.widget.Toast;
 import com.cabletv.player.R;
 import com.cabletv.player.config.AppConfig;
 import com.cabletv.player.server.ConfigWebServer;
+import com.cabletv.player.update.AppVersion;
+import com.cabletv.player.update.UpdateError;
+import com.cabletv.player.update.UpdateManager;
+import com.cabletv.player.update.UpdateState;
+import com.cabletv.player.update.UpdateStatus;
 import com.cabletv.player.util.LocalPlaylistFolder;
 
 import xyz.doikki.videoplayer.player.VideoViewConfig;
@@ -31,9 +37,10 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Date;
 import java.util.List;
 
-public class SettingsActivity extends Activity {
+public class SettingsActivity extends Activity implements UpdateManager.Listener {
     private static final String TAG = "SettingsActivity";
     private static final int REQUEST_PICK_M3U_FILE = 1001;
     private static final int REQUEST_STORAGE_PERMISSION = 1002;
@@ -53,6 +60,11 @@ public class SettingsActivity extends Activity {
     private TextView mEpgM3uEmbeddedText;
     private TextView mM3uFilePathText;
     private TextView mM3uDropDirText;
+    private TextView mAppVersionText;
+    private CheckBox mUpdateAutoCheckToggle;
+    private TextView mUpdateStatusText;
+    private TextView mUpdateChangelogText;
+    private TextView mUpdateLastCheckText;
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
@@ -80,12 +92,18 @@ public class SettingsActivity extends Activity {
         mEpgM3uEmbeddedText = findViewById(R.id.epg_m3u_embedded);
         mM3uFilePathText = findViewById(R.id.m3u_file_path_text);
         mM3uDropDirText = findViewById(R.id.m3u_drop_dir_text);
+        mAppVersionText = findViewById(R.id.app_version_text);
+        mUpdateAutoCheckToggle = findViewById(R.id.update_auto_check_toggle);
+        mUpdateStatusText = findViewById(R.id.update_status_text);
+        mUpdateChangelogText = findViewById(R.id.update_changelog_text);
+        mUpdateLastCheckText = findViewById(R.id.update_last_check_text);
 
         Button saveM3uBtn = findViewById(R.id.save_m3u_btn);
         Button saveEpgBtn = findViewById(R.id.save_epg_btn);
         Button pickM3uFileBtn = findViewById(R.id.pick_m3u_file_btn);
         Button scanM3uFileBtn = findViewById(R.id.scan_m3u_file_btn);
         Button clearM3uFileBtn = findViewById(R.id.clear_m3u_file_btn);
+        Button checkUpdateBtn = findViewById(R.id.check_update_btn);
 
         // Find or create EPG display toggle
         try {
@@ -107,6 +125,12 @@ public class SettingsActivity extends Activity {
         scanM3uFileBtn.setOnClickListener(v -> showFolderImportDialog());
         clearM3uFileBtn.setOnClickListener(v -> clearM3uFile());
         mWebServerToggle.setOnCheckedChangeListener((btn, isChecked) -> handleWebServerToggle(isChecked));
+        checkUpdateBtn.setOnClickListener(v -> UpdateManager.get().checkNow(this));
+        mUpdateAutoCheckToggle.setOnCheckedChangeListener((btn, isChecked) -> {
+            AppConfig.setUpdateAutoCheckEnabled(isChecked);
+            Toast.makeText(this, isChecked ? R.string.update_auto_check_on : R.string.update_auto_check_off,
+                    Toast.LENGTH_SHORT).show();
+        });
 
         if (mEpgDisplayToggle != null) {
             mEpgDisplayToggle.setOnCheckedChangeListener((btn, isChecked) -> {
@@ -240,6 +264,10 @@ public class SettingsActivity extends Activity {
         if (mVideoTunnelingToggle != null) {
             mVideoTunnelingToggle.setChecked(AppConfig.isTunnelingEnabled());
         }
+        mAppVersionText.setText(getString(R.string.app_version_format,
+                AppVersion.name(this), AppVersion.code(this)));
+        mUpdateAutoCheckToggle.setChecked(AppConfig.isUpdateAutoCheckEnabled());
+        renderUpdateStatus();
         updateM3uEpgInfo();
         updateM3uFileInfo();
         updateM3uDropDirText();
@@ -356,6 +384,84 @@ public class SettingsActivity extends Activity {
         // The user may have just granted all-files access in system settings; the advertised
         // folder moves to /sdcard/LiteTV once that is available.
         updateM3uDropDirText();
+        // A check may have finished while this screen was in the background (the start-up one is
+        // silent), so re-read the current status and follow it from here on.
+        UpdateManager.get().addListener(this);
+        renderUpdateStatus();
+    }
+
+    @Override
+    protected void onPause() {
+        UpdateManager.get().removeListener(this);
+        super.onPause();
+        renderLastCheck();
+    }
+
+    @Override
+    public void onUpdateStatusChanged(UpdateStatus status) {
+        renderUpdateStatus();
+    }
+
+    /** Paints the current update status; the only place that decides how it reads on screen. */
+    private void renderUpdateStatus() {
+        UpdateStatus status = UpdateManager.get().getStatus();
+        mUpdateStatusText.setText(statusText(status));
+        if (status.state == UpdateState.UPDATE_AVAILABLE && !status.changelog.isEmpty()) {
+            StringBuilder text = new StringBuilder(getString(R.string.update_changelog_title));
+            for (String line : status.changelog) {
+                text.append('\n').append("• ").append(line);
+            }
+            mUpdateChangelogText.setText(text.toString());
+            mUpdateChangelogText.setVisibility(View.VISIBLE);
+        } else {
+            mUpdateChangelogText.setVisibility(View.GONE);
+        }
+        renderLastCheck();
+    }
+
+    private CharSequence statusText(UpdateStatus status) {
+        switch (status.state) {
+            case CHECKING:
+                return getString(R.string.update_checking);
+            case UP_TO_DATE:
+                return getString(R.string.update_up_to_date);
+            case UPDATE_AVAILABLE:
+                return getString(R.string.update_available, status.latestVersionName);
+            case ERROR:
+                return updateErrorText(status.error);
+            default:
+                return "";
+        }
+    }
+
+    private String updateErrorText(UpdateError error) {
+        switch (error) {
+            case NETWORK:
+                return getString(R.string.update_error_network);
+            case HTTP_NOT_FOUND:
+                // Normal until a release publishes the manifest asset, so it must not read as a fault.
+                return getString(R.string.update_error_no_manifest);
+            case HTTP:
+                return getString(R.string.update_error_http);
+            case PARSE:
+                return getString(R.string.update_error_parse);
+            case NO_BUILD_FOR_DEVICE:
+                return getString(R.string.update_error_no_build);
+            default:
+                return getString(R.string.update_error_unknown);
+        }
+    }
+
+    private void renderLastCheck() {
+        long lastCheckMs = AppConfig.getUpdateLastCheckMs();
+        if (lastCheckMs <= 0L) {
+            mUpdateLastCheckText.setText(R.string.update_never_checked);
+            return;
+        }
+        Date when = new Date(lastCheckMs);
+        String stamp = android.text.format.DateFormat.getMediumDateFormat(this).format(when)
+                + " " + android.text.format.DateFormat.getTimeFormat(this).format(when);
+        mUpdateLastCheckText.setText(getString(R.string.update_last_check_format, stamp));
     }
 
     @Override
