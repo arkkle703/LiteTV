@@ -5,6 +5,11 @@ import android.text.TextUtils;
 import android.util.Log;
 
 import com.cabletv.player.config.AppConfig;
+import com.cabletv.player.update.AppVersion;
+import com.cabletv.player.update.UpdateError;
+import com.cabletv.player.update.UpdateManager;
+import com.cabletv.player.update.UpdateState;
+import com.cabletv.player.update.UpdateStatus;
 import com.cabletv.player.util.LocalPlaylistFolder;
 import com.google.gson.JsonObject;
 
@@ -263,6 +268,15 @@ public class ConfigWebServer {
             } else if ("POST".equals(method) && "/config/display".equals(path)) {
                 response = handleDisplayPost(body);
                 contentType = "application/json";
+            } else if ("POST".equals(method) && "/config/update-settings".equals(path)) {
+                response = handleUpdateSettingsPost(body);
+                contentType = "application/json";
+            } else if ("POST".equals(method) && "/config/update-check".equals(path)) {
+                response = handleUpdateCheckPost();
+                contentType = "application/json";
+            } else if ("POST".equals(method) && "/config/update-install".equals(path)) {
+                response = handleUpdateInstallPost();
+                contentType = "application/json";
             } else if ("POST".equals(method) && UPLOAD_PATH.equals(path)) {
                 response = handleM3uFileUpload(rawBody, requestContentType);
                 contentType = "application/json";
@@ -489,7 +503,95 @@ public class ConfigWebServer {
                 AppConfig.getVideoRenderMode() == AppConfig.RENDER_TEXTURE ? "texture" : "surface");
         config.addProperty("video_decode_mode", decodeModeName(AppConfig.getVideoDecodeMode()));
         config.addProperty("video_tunneling", AppConfig.isTunnelingEnabled());
+        // Update state, so the page can show what the television knows without polling it.
+        config.addProperty("app_version_name", appContext == null ? "" : AppVersion.name(appContext));
+        config.addProperty("app_version_code", appContext == null ? 0 : AppVersion.code(appContext));
+        config.addProperty("update_auto_check", AppConfig.isUpdateAutoCheckEnabled());
+        config.addProperty("update_last_check_ms", AppConfig.getUpdateLastCheckMs());
+        config.addProperty("update_last_error", AppConfig.getUpdateLastError());
+        addUpdateStateJson(config, UpdateManager.get().getStatus());
         return config.toString();
+    }
+
+    /**
+     * Adds the parts of the update status both {@code /config/get} and the two update endpoints
+     * return. One helper so the page never has to reconcile two shapes.
+     */
+    static void addUpdateStateJson(JsonObject target, UpdateStatus status) {
+        target.addProperty("update_state", status.state.name().toLowerCase(java.util.Locale.US));
+        target.addProperty("update_progress", Math.round(status.progressFraction() * 100f));
+        target.addProperty("update_error", status.error == UpdateError.NONE ? "" : status.error.name());
+        if (status.latestVersionName != null) {
+            target.addProperty("update_latest_version", status.latestVersionName);
+        }
+        if (!status.changelog.isEmpty()) {
+            target.add("update_changelog", new com.google.gson.Gson().toJsonTree(status.changelog));
+        }
+    }
+
+    /**
+     * Saves the update preferences. Only the automatic-check switch is a setting; checking and
+     * installing are actions with their own endpoints, because they do something.
+     */
+    private static String handleUpdateSettingsPost(String body) {
+        try {
+            Map<String, String> params = parseFormData(body);
+            String autoCheck = params.get("update_auto_check");
+            if (!isValidFlag(autoCheck)) {
+                return jsonResult(false, "Invalid update setting");
+            }
+            if (autoCheck != null) {
+                AppConfig.setUpdateAutoCheckEnabled("1".equals(autoCheck));
+            }
+            return jsonResult(true, "Update settings saved");
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving update settings", e);
+            return jsonResult(false, "Failed to save update settings");
+        }
+    }
+
+    /**
+     * Checks for a newer release and answers with the result. This is the one endpoint that blocks
+     * on the network; the fetcher's timeouts bound it.
+     */
+    private static String handleUpdateCheckPost() {
+        Context appContext = sAppContext;
+        if (appContext == null) {
+            return jsonResult(false, "Not ready");
+        }
+        try {
+            UpdateStatus status = UpdateManager.get().checkNowAndWait(appContext);
+            JsonObject json = new JsonObject();
+            json.addProperty("success", true);
+            json.addProperty("message", "Checked");
+            addUpdateStateJson(json, status);
+            return json.toString();
+        } catch (Exception e) {
+            Log.e(TAG, "Error checking for updates", e);
+            return jsonResult(false, "Failed to check for updates");
+        }
+    }
+
+    /**
+     * Starts the whole flow on the television: download, verify, then the system installer prompt.
+     * Answers immediately; the page follows the state through {@code /config/get}.
+     */
+    private static String handleUpdateInstallPost() {
+        Context appContext = sAppContext;
+        if (appContext == null) {
+            return jsonResult(false, "Not ready");
+        }
+        UpdateStatus status = UpdateManager.get().getStatus();
+        if (!status.isUpdateAvailable() && status.state != UpdateState.READY) {
+            return jsonResult(false, "No update to install yet");
+        }
+        try {
+            UpdateManager.get().downloadAndInstall(appContext);
+            return jsonResult(true, "Updating on the TV; confirm the install there");
+        } catch (Exception e) {
+            Log.e(TAG, "Error starting the update", e);
+            return jsonResult(false, "Failed to start the update");
+        }
     }
 
     private static String decodeModeName(int mode) {
@@ -842,6 +944,20 @@ public class ConfigWebServer {
                 "            <div id=\"playbackStatus\" class=\"status\"></div>\n" +
                 "            <div class=\"info\">播放设置需重启电视端应用后生效；显示设置下次打开频道列表时生效。</div>\n" +
                 "        </div>\n" +
+                "        \n" +
+                "        <div class=\"section\">\n" +
+                "            <h2>关于 / 更新</h2>\n" +
+                "            <div id=\"appVersionInfo\" class=\"info\"></div>\n" +
+                "            <label style=\"display:flex;align-items:center;gap:8px;margin:12px 0;\">\n" +
+                "                <input type=\"checkbox\" id=\"updateAutoCheck\"> 自动检查更新（每天最多一次）\n" +
+                "            </label>\n" +
+                "            <div id=\"updateStateInfo\" class=\"info\"></div>\n" +
+                "            <div id=\"updateChangelog\" class=\"info\" style=\"white-space:pre-line;\"></div>\n" +
+                "            <button onclick=\"checkUpdate()\">检查更新</button>\n" +
+                "            <button onclick=\"installUpdate()\" id=\"updateInstallBtn\" style=\"margin-left:8px;\">立即更新</button>\n" +
+                "            <div id=\"updateStatus\" class=\"status\"></div>\n" +
+                "            <div class=\"info\">「立即更新」会让电视自动下载并校验安装包，然后在电视上弹出系统安装确认——安装需要有人在电视旁按确认。</div>\n" +
+                "        </div>\n" +
                 "    </div>\n" +
                 "    <script>\n" +
                 "        function saveM3uUrl() {\n" +
@@ -968,6 +1084,83 @@ public class ConfigWebServer {
                 "                document.getElementById('playbackStatus').textContent = '✗ 网络错误: ' + e;\n" +
                 "            });\n" +
                 "        }\n" +
+                "        function saveUpdateSettings() {\n" +
+                "            const body = 'update_auto_check=' + (document.getElementById('updateAutoCheck').checked ? '1' : '0');\n" +
+                "            fetch('/config/update-settings', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body})\n" +
+                "                .then(r => r.json()).then(d => {\n" +
+                "                    const status = document.getElementById('updateStatus');\n" +
+                "                    status.className = 'status ' + (d.success ? 'success' : 'error');\n" +
+                "                    status.textContent = (d.success ? '✓ ' : '✗ ') + d.message;\n" +
+                "                }).catch(e => console.error('保存更新设置失败:', e));\n" +
+                "        }\n" +
+                "        function updateStateText(d) {\n" +
+                "            const state = d.update_state || '';\n" +
+                "            if (state === 'checking') return '正在检查更新…';\n" +
+                "            if (state === 'up_to_date') return '已是最新版本';\n" +
+                "            if (state === 'update_available') return '发现新版本 ' + (d.update_latest_version || '');\n" +
+                "            if (state === 'downloading') return '电视正在下载… ' + (d.update_progress || 0) + '%';\n" +
+                "            if (state === 'ready') return '已下载并校验通过，等待在电视上确认安装';\n" +
+                "            if (state === 'installing') return '等待电视上的安装确认…';\n" +
+                "            if (state === 'needs_permission') return '电视需要先允许 LiteTV 安装更新（请在电视上打开设置）';\n" +
+                "            if (state === 'error') return '检查失败：' + updateErrorText(d.update_error);\n" +
+                "            return '尚未检查';\n" +
+                "        }\n" +
+                // Error codes are the app's own enums; translate them once for the page.
+                "        function updateErrorText(code) {\n" +
+                "            const errors = {NETWORK: '网络不可用', HTTP: '服务器错误', HTTP_NOT_FOUND: '该版本尚未发布更新信息', PARSE: '更新信息格式不可用', NO_BUILD_FOR_DEVICE: '没有适配电视 CPU 的安装包', CHECKSUM: '安装包校验失败，已删除', SIGNATURE: '安装包签名与应用不一致，已拒绝', STORAGE: '存储空间异常', INSTALL_BLOCKED: '系统阻止安装，需在电视上允许', INSTALL_FAILED: '安装失败', CANCELLED: '已取消下载', UNKNOWN: '未知错误'};\n" +
+                "            return errors[code] || code || '未知错误';\n" +
+                "        }\n" +
+                "        function renderUpdate(d) {\n" +
+                "            document.getElementById('appVersionInfo').textContent = '电视端版本: LiteTV ' + (d.app_version_name || '?') + ' (' + (d.app_version_code || 0) + ')' + (d.update_last_check_ms ? '，上次检查 ' + new Date(d.update_last_check_ms).toLocaleString() : '，从未检查');\n" +
+                "            document.getElementById('updateStateInfo').textContent = updateStateText(d);\n" +
+                "            const changelog = d.update_changelog || [];\n" +
+                "            document.getElementById('updateChangelog').textContent = changelog.length ? ('更新内容：\\n· ' + changelog.join('\\n· ')) : '';\n" +
+                "        }\n" +
+                "        function checkUpdate() {\n" +
+                "            const status = document.getElementById('updateStatus');\n" +
+                "            status.className = 'status success';\n" +
+                "            status.textContent = '正在让电视检查更新…';\n" +
+                "            fetch('/config/update-check', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'action=check'})\n" +
+                "                .then(r => r.json()).then(d => {\n" +
+                "                    renderUpdate(d);\n" +
+                "                    status.className = 'status ' + (d.success ? 'success' : 'error');\n" +
+                "                    status.textContent = (d.success ? '✓ ' : '✗ ') + updateStateText(d);\n" +
+                "                }).catch(e => {\n" +
+                "                    status.className = 'status error';\n" +
+                "                    status.textContent = '✗ 无法让电视检查更新: ' + e;\n" +
+                "                });\n" +
+                "        }\n" +
+                "        function installUpdate() {\n" +
+                "            const status = document.getElementById('updateStatus');\n" +
+                "            if (!confirm('将在电视上下载并校验安装包，然后需要有人在电视上确认安装。继续？')) return;\n" +
+                "            fetch('/config/update-install', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'action=install'})\n" +
+                "                .then(r => r.json()).then(d => {\n" +
+                "                    if (!d.success) {\n" +
+                "                        status.className = 'status error';\n" +
+                "                        status.textContent = '✗ ' + d.message;\n" +
+                "                        return;\n" +
+                "                    }\n" +
+                "                    status.className = 'status success';\n" +
+                "                    status.textContent = '✓ ' + d.message;\n" +
+                "                    pollUpdate(0);\n" +
+                "                }).catch(e => {\n" +
+                "                    status.className = 'status error';\n" +
+                "                    status.textContent = '✗ 无法触发更新: ' + e;\n" +
+                "                });\n" +
+                "        }\n" +
+                "        function pollUpdate(attempt) {\n" +
+                "            if (attempt > 40) return;\n" +
+                "            fetch('/config/get').then(r => r.json()).then(d => {\n" +
+                "                renderUpdate(d);\n" +
+                "                const status = document.getElementById('updateStatus');\n" +
+                "                status.className = 'status ' + (d.update_state === 'error' ? 'error' : 'success');\n" +
+                "                status.textContent = updateStateText(d);\n" +
+                "                const state = d.update_state || '';\n" +
+                "                if (state === 'downloading' || state === 'checking' || state === 'ready') {\n" +
+                "                    setTimeout(() => pollUpdate(attempt + 1), 1500);\n" +
+                "                }\n" +
+                "            }).catch(e => console.error('轮询更新状态失败:', e));\n" +
+                "        }\n" +
                 "        window.onload = function() {\n" +
                 "            fetch('/config/get').then(r => r.json()).then(d => {\n" +
                 "                document.getElementById('m3uUrl').value = d.m3u_url || '';\n" +
@@ -997,8 +1190,11 @@ public class ConfigWebServer {
                 "                document.getElementById('epgActiveInfo').textContent = active\n" +
                 "                    ? '当前生效 EPG: ' + active\n" +
                 "                    : '当前无生效 EPG 来源';\n" +
+                "                document.getElementById('updateAutoCheck').checked = d.update_auto_check !== false;\n" +
+                "                renderUpdate(d);\n" +
                 "            }).catch(e => console.error('加载配置失败:', e));\n" +
                 "        };\n" +
+                "        document.getElementById('updateAutoCheck').addEventListener('change', saveUpdateSettings);\n" +
                 "    </script>\n" +
                 "</body>\n" +
                 "</html>";

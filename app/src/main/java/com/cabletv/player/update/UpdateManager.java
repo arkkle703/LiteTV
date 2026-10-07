@@ -41,6 +41,8 @@ public class UpdateManager {
     private final UpdateChecker mChecker;
     private final UpdateDownloader mDownloader;
     private final AtomicBoolean mCancelDownload = new AtomicBoolean(false);
+    /** Set when the web page asked for the whole flow, cleared once the installer is shown. */
+    private volatile boolean mInstallWhenReady;
 
     private volatile UpdateStatus mStatus = UpdateStatus.idle();
 
@@ -120,6 +122,22 @@ public class UpdateManager {
     }
 
     private void runCheck(Context appContext) {
+        performCheck(appContext);
+    }
+
+    /**
+     * Runs a check on the calling thread and returns its result. The web page uses this: a browser
+     * press wants an answer in the same request, while the start-up check stays asynchronous.
+     */
+    public UpdateStatus checkNowAndWait(Context appContext) {
+        return performCheck(appContext.getApplicationContext());
+    }
+
+    /**
+     * The single place a check happens, so the web request and the background check cannot run on
+     * top of each other. Blocking; the caller is either the update thread or a web worker.
+     */
+    private synchronized UpdateStatus performCheck(Context appContext) {
         publish(UpdateStatus.checking());
         UpdateStatus status;
         try {
@@ -141,6 +159,7 @@ public class UpdateManager {
                     + (status.latestVersionName != null ? " (latest " + status.latestVersionName + ")" : ""));
         }
         publish(status);
+        return status;
     }
 
     private void publish(final UpdateStatus status) {
@@ -180,6 +199,22 @@ public class UpdateManager {
         mCancelDownload.set(true);
     }
 
+    /**
+     * What the web page's single "update now" button means: fetch the APK, and once it is verified,
+     * put the system's own confirmation on the television. The install still has to be accepted on
+     * the television itself, which is the point — a phone on the same network cannot install
+     * anything on the TV without someone there agreeing.
+     */
+    public void downloadAndInstall(Context context) {
+        UpdateStatus current = mStatus;
+        if (current.state == UpdateState.READY) {
+            installUpdate(context);
+            return;
+        }
+        mInstallWhenReady = true;
+        downloadUpdate(context);
+    }
+
     private void runDownload(Context context, UpdateManifest.Variant variant, int expectedVersionCode) {
         UpdateStatus before = mStatus;
         try {            File apk = mDownloader.download(context, variant.url, variant.size, variant.sha256,
@@ -194,8 +229,14 @@ public class UpdateManager {
             Log.i(TAG, "APK verified and ready to install: " + apk);
             AppConfig.setUpdateLastError("");
             publish(before.toReady(apk));
+            if (mInstallWhenReady) {
+                // The web page asked for the whole flow; carry on to the installer prompt.
+                mInstallWhenReady = false;
+                installUpdate(context);
+            }
         } catch (UpdateDownloader.DownloadException e) {
             Log.w(TAG, "Download failed: " + e.error + " (" + e.getMessage() + ")");
+            mInstallWhenReady = false;
             if (e.error == UpdateError.CANCELLED) {
                 // Not a failure: the update is still on offer and the partial file is kept.
                 publish(before.backToAvailable(UpdateError.CANCELLED));

@@ -332,4 +332,90 @@ public class ConfigWebServerTest {
         String[] res = request("GET", "/config/nope", null, null);
         assertEquals("404", res[0]);
     }
+
+    // ---- update endpoints ----
+
+    @Test
+    public void updateSettingsPost_savesTheAutoCheckSwitchAndReportsItBack() throws Exception {
+        AppConfig.setUpdateAutoCheckEnabled(true);
+        String[] res = request("POST", "/config/update-settings",
+                "Content-Type: application/x-www-form-urlencoded\r\n", "update_auto_check=0");
+        assertEquals("200", res[0]);
+        assertTrue(res[1].contains("\"success\":true"));
+        assertTrue("the switch must actually change", !AppConfig.isUpdateAutoCheckEnabled());
+
+        String[] config = request("GET", "/config/get", null, null);
+        assertTrue("the page must be able to read it back: " + config[1],
+                config[1].contains("\"update_auto_check\":false"));
+    }
+
+    @Test
+    public void updateSettingsPost_rejectsAnInvalidValueWithoutWritingAnything() throws Exception {
+        AppConfig.setUpdateAutoCheckEnabled(true);
+        String[] res = request("POST", "/config/update-settings",
+                "Content-Type: application/x-www-form-urlencoded\r\n", "update_auto_check=maybe");
+        assertTrue("invalid input must be rejected: " + res[1], res[1].contains("\"success\":false"));
+        assertTrue("nothing may be written on rejection", AppConfig.isUpdateAutoCheckEnabled());
+    }
+
+    @Test
+    public void getConfig_reportsTheInstalledVersionAndUpdateState() throws Exception {
+        String[] res = request("GET", "/config/get", null, null);
+        assertEquals("200", res[0]);
+        assertTrue("the page shows the TV's version: " + res[1], res[1].contains("\"app_version_name\":"));
+        assertTrue(res[1].contains("\"app_version_code\":"));
+        assertTrue(res[1].contains("\"update_state\":"));
+        assertTrue(res[1].contains("\"update_progress\":"));
+        assertTrue(res[1].contains("\"update_auto_check\":"));
+    }
+
+    @Test
+    public void updateInstallPost_refusesWhenNothingIsKnownToUpdate() throws Exception {
+        // The manager has not checked in this process, so there is nothing to install; the endpoint
+        // must say so instead of starting a download of nothing. No network is touched here.
+        String[] res = request("POST", "/config/update-install",
+                "Content-Type: application/x-www-form-urlencoded\r\n", "");
+        assertEquals("200", res[0]);
+        assertTrue("got " + res[1], res[1].contains("\"success\":false"));
+        assertTrue("the reason must name the problem: " + res[1],
+                res[1].contains("No update to install yet"));
+    }
+
+    @Test
+    public void updateStateJson_tellsThePageWhatIsHappening() throws Exception {
+        // Checked directly because the alternative -- driving the real singleton -- needs a network.
+        com.google.gson.JsonObject json = new com.google.gson.JsonObject();
+        ConfigWebServer.addUpdateStateJson(json,
+                com.cabletv.player.update.UpdateStatus.idle());
+        assertEquals("idle", json.get("update_state").getAsString());
+        assertEquals(0, json.get("update_progress").getAsInt());
+        assertEquals("", json.get("update_error").getAsString());
+
+        com.cabletv.player.update.UpdateManifest manifest = com.cabletv.player.update.UpdateManifest.parse(
+                "{\"versionCode\":7,\"versionName\":\"1.5.0\",\"changelog\":[\"note\"],\"variants\":{"
+                        + "\"x86\":{\"url\":\"https://github.com/vibe4free/LiteTV/releases/download/"
+                        + "v1.5.0/LiteTV.apk\",\"sha256\":\"" + SHA + "\",\"size\":1000}}}");
+        com.google.gson.JsonObject available = new com.google.gson.JsonObject();
+        ConfigWebServer.addUpdateStateJson(available, com.cabletv.player.update.UpdateStatus.available(
+                manifest, manifest.variantFor(new String[]{"x86"}), 1L));
+        assertEquals("update_available", available.get("update_state").getAsString());
+        assertEquals("1.5.0", available.get("update_latest_version").getAsString());
+        assertEquals(1, available.getAsJsonArray("update_changelog").size());
+
+        com.google.gson.JsonObject downloading = new com.google.gson.JsonObject();
+        ConfigWebServer.addUpdateStateJson(downloading,
+                com.cabletv.player.update.UpdateStatus.available(manifest,
+                        manifest.variantFor(new String[]{"x86"}), 1L).withProgress(250L, 1000L));
+        assertEquals("downloading", downloading.get("update_state").getAsString());
+        assertEquals(25, downloading.get("update_progress").getAsInt());
+
+        com.google.gson.JsonObject failed = new com.google.gson.JsonObject();
+        ConfigWebServer.addUpdateStateJson(failed, com.cabletv.player.update.UpdateStatus.error(
+                com.cabletv.player.update.UpdateError.HTTP_NOT_FOUND, 1L));
+        assertEquals("error", failed.get("update_state").getAsString());
+        assertEquals("HTTP_NOT_FOUND", failed.get("update_error").getAsString());
+    }
+
+    private static final String SHA = "00112233445566778899aabbccddeeff"
+            + "00112233445566778899aabbccddeeff";
 }
