@@ -1123,6 +1123,10 @@ public class EpgManager {
         for (int redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
             URL url = new URL(current);
             HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            if (connection instanceof javax.net.ssl.HttpsURLConnection) {
+                // Old devices cannot validate the roots most EPG servers chain to now.
+                com.cabletv.player.util.TlsCompat.applyTo((javax.net.ssl.HttpsURLConnection) connection);
+            }
             connection.setRequestMethod("GET");
             connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
             connection.setReadTimeout(READ_TIMEOUT_MS);

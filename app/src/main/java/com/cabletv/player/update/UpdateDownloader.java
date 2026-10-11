@@ -70,12 +70,18 @@ public class UpdateDownloader {
     /** The scheme is a parameter so tests can drive a local server; production requires HTTPS. */
     UpdateDownloader(String requiredScheme) {
         mRequiredScheme = requiredScheme;
-        mClient = new OkHttpClient.Builder()
+        OkHttpClient.Builder builder = new OkHttpClient.Builder()
                 .connectTimeout(10, TimeUnit.SECONDS)
                 .readTimeout(30, TimeUnit.SECONDS)
                 .followRedirects(false)
-                .followSslRedirects(false)
-                .build();
+                .followSslRedirects(false);
+        // Same reason as the manifest fetch: the APK is served from GitHub's content hosts, which
+        // old devices cannot validate without the bundled roots.
+        javax.net.ssl.SSLContext tls = com.cabletv.player.util.TlsCompat.sslContext();
+        if (tls != null) {
+            builder.sslSocketFactory(tls.getSocketFactory(), com.cabletv.player.util.TlsCompat.trustManager());
+        }
+        mClient = builder.build();
     }
 
     /** Where the download lives. External cache first: it is bigger and never needs a permission. */

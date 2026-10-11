@@ -4,6 +4,7 @@ import android.app.Application;
 import android.util.Log;
 
 import com.cabletv.player.config.AppConfig;
+import com.cabletv.player.util.TlsCompat;
 import com.cabletv.player.update.UpdateManager;
 import com.orhanobut.hawk.Hawk;
 
@@ -19,6 +20,9 @@ public class App extends Application {
     public void onCreate() {
         super.onCreate();
         Hawk.init(this).build();
+        // Old Android releases cannot validate the chains GitHub and Let's Encrypt use now; this
+        // extends the trust store for our own connections before anything needs it.
+        TlsCompat.init(this);
         applyPlayerConfiguration();
         setupExceptionHandler();
         // Delayed and silent: it must not slow down the first channel nor pop anything on screen.

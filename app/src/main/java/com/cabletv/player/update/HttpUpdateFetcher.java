@@ -1,5 +1,7 @@
 package com.cabletv.player.update;
 
+import com.cabletv.player.util.TlsCompat;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -31,12 +33,18 @@ public class HttpUpdateFetcher implements UpdateFetcher {
     private final OkHttpClient mClient;
 
     public HttpUpdateFetcher() {
-        mClient = new OkHttpClient.Builder()
+        OkHttpClient.Builder builder = new OkHttpClient.Builder()
                 .connectTimeout(5, TimeUnit.SECONDS)
                 .readTimeout(10, TimeUnit.SECONDS)
                 .followRedirects(false)
-                .followSslRedirects(false)
-                .build();
+                .followSslRedirects(false);
+        // Without this, devices whose certificate store predates GitHub's current chain cannot
+        // validate it at all ("Trust anchor for certification path not found").
+        javax.net.ssl.SSLContext tls = TlsCompat.sslContext();
+        if (tls != null) {
+            builder.sslSocketFactory(tls.getSocketFactory(), TlsCompat.trustManager());
+        }
+        mClient = builder.build();
     }
 
     @Override
