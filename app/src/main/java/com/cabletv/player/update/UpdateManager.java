@@ -297,17 +297,34 @@ public class UpdateManager {
                 && status.isReadyToInstall();
     }
 
+    /**
+     * True when a remembered download is for a version that is already installed (or older): the
+     * marker outlived the install it was meant for, and offering it again would ask the user to
+     * install what they are running.
+     */
+    static boolean isPendingStale(int pendingVersionCode, int installedVersionCode) {
+        return pendingVersionCode <= installedVersionCode;
+    }
+
     /** Puts a downloaded-but-uninstalled update back on offer without touching the network. */
     private void restorePendingDownload(Context context) {
         int pending = AppConfig.getUpdatePendingVersion();
         if (pending <= 0) {
             return;
         }
+        boolean stale = isPendingStale(pending, AppVersion.code(context));
         File apk = UpdateDownloader.targetFile(context);
-        if (!apk.isFile()) {
-            // The cache was cleared (or the system reclaimed it); forget the claim.
+        if (stale || !apk.isFile()) {
+            // Either the update has just been installed (the marker outlived the download) or the
+            // cache was cleared. Offering it again would ask the user to install the version they
+            // are already running, so the claim is dropped and the leftover file goes with it.
+            Log.d(TAG, "Dropping a stale pending update (" + pending + ", installed "
+                    + AppVersion.code(context) + ")");
             AppConfig.setUpdatePendingVersion(0);
             AppConfig.setUpdatePendingName("");
+            if (stale) {
+                UpdateDownloader.clear(context);
+            }
             return;
         }
         publish(UpdateStatus.readyFromCache(pending, AppConfig.getUpdatePendingName(), apk));
