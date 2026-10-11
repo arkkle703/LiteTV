@@ -229,6 +229,7 @@ public class MainActivity extends Activity {
                 // Refresh the list after the index is known, so the highlight matches what plays
                 if (mChannelListComponent != null) {
                     mChannelListComponent.refreshChannels(mCurrentChannelIndex);
+                    syncGuideFocusTime();
                 }
                 // Hand the channels to the EPG manager now that they are truly available (no
                 // race with reload()). It decides for itself whether the cache still serves or
@@ -723,6 +724,8 @@ public class MainActivity extends Activity {
         mCatchupProgram = program;
         mCatchupPlayheadMs = startMs;
         mCurrentUrlIndex = 0;
+        // The guide now belongs to the replayed programme, not to whatever airs now.
+        syncGuideFocusTime();
         // Leave the list so the replayed stream is visible; short OK reopens it.
         if (mChannelListVisible) {
             hideChannelList();
@@ -812,6 +815,7 @@ public class MainActivity extends Activity {
         mCatchupChannel = null;
         mCatchupProgram = null;
         mCatchupPlayheadMs = 0;
+        syncGuideFocusTime();
         android.widget.Toast.makeText(this, R.string.catchup_exited,
                 android.widget.Toast.LENGTH_SHORT).show();
         playChannel(mCurrentChannelIndex);
@@ -993,13 +997,14 @@ public class MainActivity extends Activity {
             }
             return;
         }
-        // Inside the programme column, LEFT leaves it the same way BACK does. Day stepping lives on
-        // the list's own ends instead (see moveSelectionInList), because a viewer pressing LEFT
-        // expects to go back to the channels — and on most channels the guide only has today, where
-        // paging back did nothing at all and LEFT looked broken.
+        // Inside the programme column, LEFT steps back a day. When there is no earlier day (most
+        // feeds carry today alone) it folds back to the channels instead of doing nothing, so the
+        // key is never a dead end; the ends of the list page the days as well (moveSelectionInList).
         if (mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.PROGRAMS) {
-            Log.d(TAG, "handleFocusLeft: leaving the programme column");
-            mChannelListComponent.moveFocusToChannels();
+            if (!mChannelListComponent.moveProgramDay(-1)) {
+                Log.d(TAG, "handleFocusLeft: no earlier day, folding back to channels");
+                mChannelListComponent.moveFocusToChannels();
+            }
             return;
         }
         Log.d(TAG, "handleFocusLeft: Moving focus to groups");
@@ -1070,6 +1075,20 @@ public class MainActivity extends Activity {
         }
     }
 
+    /**
+     * Tells the guide which moment it should land on: now while watching live, or the programme
+     * being replayed during catchup. Without this the guide always aimed at the current time, so
+     * opening it during a replay pointed at a programme the viewer was not watching.
+     */
+    private void syncGuideFocusTime() {
+        if (mChannelListComponent == null) {
+            return;
+        }
+        long focusTime = (mCatchupActive && mCatchupProgram != null)
+                ? mCatchupProgram.startTime : System.currentTimeMillis();
+        mChannelListComponent.setProgramFocusTime(focusTime);
+    }
+
     private void showChannelList() {
         if (mChannelListComponent == null) {
             mChannelListComponent = new ChannelListComponent(this, mNavigator);
@@ -1124,6 +1143,10 @@ public class MainActivity extends Activity {
             // Open on the group the channel keys are walking, with the playing channel highlighted
             mChannelListComponent.showGroup(mNavigator.currentGroupIndex(), mCurrentChannelIndex);
             mChannelListComponent.moveFocusToChannels();
+            // Re-aim the guide every time the list opens: the programme that aired when the list
+            // was last prepared may be over by now, which is what made the guide open on the wrong
+            // programme (reported for both live and catchup).
+            syncGuideFocusTime();
             mChannelListComponent.setVisibility(android.view.View.VISIBLE);
         }
     }

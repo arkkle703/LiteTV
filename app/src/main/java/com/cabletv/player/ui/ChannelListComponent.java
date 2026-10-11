@@ -64,6 +64,11 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
      * Navigated with LEFT/RIGHT while the programme column has focus.
      */
     private int mDayOffset = 0;
+    /**
+     * The moment the guide should land on: the current time for live television, or the start of
+     * the programme being replayed during catchup. 0 means "follow the clock".
+     */
+    private long mProgramFocusTimeMs = 0;
     private static final int MAX_DAY_BACK = 6;  // today plus six days back = the 7-day window
     private static final int MAX_DAY_AHEAD = 1; // feeds (51zmt etc.) often carry tomorrow
     /** Day offsets (within the window) that the selected channel actually has data for. */
@@ -433,23 +438,58 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         mProgramListContainer.setVisibility(VISIBLE);
         mProgramListVisible = true;
 
-        // On today's view, land on the programme airing right now; other days start at the top.
+        // Land on the programme the viewer is watching — the one airing now, or the one being
+        // replayed — but only on the day that moment belongs to. Other days start at the top.
         int selectIndex = 0;
-        if (mDayOffset == 0) {
-            long currentTime = System.currentTimeMillis();
-            for (int i = 0; i < dayPrograms.size(); i++) {
-                EpgManager.Program prog = dayPrograms.get(i);
-                if (currentTime >= prog.startTime && currentTime < prog.endTime) {
-                    selectIndex = i;
-                    break;
-                }
-            }
+        long focusTime = mProgramFocusTimeMs > 0 ? mProgramFocusTimeMs : System.currentTimeMillis();
+        if (mDayOffset == (int) (EpgCache.localDayNumber(focusTime) - todayDay)) {
+            selectIndex = nearestProgramIndex(dayPrograms, focusTime);
         }
         mSelectedProgramIndex = selectIndex;
         programAdapter.setSelectedIndex(selectIndex);
         programAdapter.setFocused(mFocusPanel == FocusPanel.PROGRAMS);
         scrollToCentered(mProgramRecyclerView, selectIndex, PROGRAM_ROW_HEIGHT_DP);
         updateProgramTitle();
+    }
+
+    /**
+     * Points the guide at a moment: the current time while watching live, or the start of the
+     * replayed programme during catchup. The day shown follows that moment, so opening the list
+     * during a replay lands on the replayed programme rather than on today's schedule.
+     */
+    public void setProgramFocusTime(long timeMs) {
+        mProgramFocusTimeMs = timeMs;
+        long today = EpgCache.localDayNumber(System.currentTimeMillis());
+        int offset = (int) (EpgCache.localDayNumber(timeMs) - today);
+        if (offset >= -MAX_DAY_BACK && offset <= MAX_DAY_AHEAD) {
+            mDayOffset = offset;
+        }
+        refreshProgramListForCurrentSelection();
+    }
+
+    /**
+     * Index of the programme covering the moment, falling back to the most recent one that has
+     * already started.
+     *
+     * <p>The exact-match-only version left the cursor on the first programme of the day whenever
+     * the guide had a gap at the current time (a stale feed, or a channel whose data starts later),
+     * which is what viewers saw as "the list opens on the wrong programme".
+     */
+    static int nearestProgramIndex(List<EpgManager.Program> dayPrograms, long timeMs) {
+        int best = 0;
+        for (int i = 0; i < dayPrograms.size(); i++) {
+            EpgManager.Program program = dayPrograms.get(i);
+            if (timeMs >= program.startTime && timeMs < program.endTime) {
+                return i;
+            }
+            if (program.startTime <= timeMs) {
+                best = i;
+            } else {
+                // Programmes are ordered by start time; nothing later can be nearer to the moment.
+                break;
+            }
+        }
+        return best;
     }
 
     /** Programmes whose start falls on the given day (relative to today). */
