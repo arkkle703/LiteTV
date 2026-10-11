@@ -105,6 +105,19 @@ public class UpdateStatusTest {
     }
 
     @Test
+    public void isReadyToInstall_coversThePermissionDetour() {
+        File apk = new File("/tmp/update.apk");
+        UpdateStatus ready = available().withProgress(1000L, 1000L).toReady(apk);
+        assertTrue(ready.isReadyToInstall());
+        // Granting the install permission must not throw away the verified download.
+        assertTrue(ready.toNeedsPermission().isReadyToInstall());
+        assertFalse("nothing is on disk yet", available().isReadyToInstall());
+        assertFalse(UpdateStatus.idle().isReadyToInstall());
+        assertFalse("a failed download leaves nothing to install",
+                available().toError(UpdateError.NETWORK).isReadyToInstall());
+    }
+
+    @Test
     public void idleAndUpToDate_haveNoUpdateOnOffer() {
         assertFalse(UpdateStatus.idle().isUpdateAvailable());
         assertFalse(UpdateStatus.upToDate(manifest(), 1L).isUpdateAvailable());

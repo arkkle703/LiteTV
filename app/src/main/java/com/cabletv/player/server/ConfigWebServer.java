@@ -582,7 +582,7 @@ public class ConfigWebServer {
             return jsonResult(false, "Not ready");
         }
         UpdateStatus status = UpdateManager.get().getStatus();
-        if (!status.isUpdateAvailable() && status.state != UpdateState.READY) {
+        if (!status.isUpdateAvailable() && !status.isReadyToInstall()) {
             return jsonResult(false, "No update to install yet");
         }
         try {

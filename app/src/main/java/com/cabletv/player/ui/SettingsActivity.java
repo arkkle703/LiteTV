@@ -445,8 +445,12 @@ public class SettingsActivity extends Activity implements UpdateManager.Listener
                 mUpdateActionButton.setText(R.string.update_installing_button);
                 break;
             case NEEDS_PERMISSION:
+                // The switch may have been granted in the meantime (the TV settings screen or ADB),
+                // in which case the same button continues the install instead of asking again.
+                boolean allowed = ApkInstaller.canRequestInstall(this);
                 mUpdateActionButton.setEnabled(true);
-                mUpdateActionButton.setText(R.string.update_permission_open);
+                mUpdateActionButton.setText(allowed ? R.string.update_install
+                        : R.string.update_permission_open);
                 break;
             default:
                 mUpdateActionButton.setEnabled(true);
@@ -468,7 +472,13 @@ public class SettingsActivity extends Activity implements UpdateManager.Listener
                 UpdateManager.get().installUpdate(this);
                 break;
             case NEEDS_PERMISSION:
-                showInstallPermissionHelp();
+                if (ApkInstaller.canRequestInstall(this)) {
+                    // Permission granted since the last attempt: pick up where it stopped, without
+                    // downloading the verified file again.
+                    UpdateManager.get().installUpdate(this);
+                } else {
+                    showInstallPermissionHelp();
+                }
                 break;
             default:
                 UpdateManager.get().checkNow(this);

@@ -207,7 +207,8 @@ public class UpdateManager {
      */
     public void downloadAndInstall(Context context) {
         UpdateStatus current = mStatus;
-        if (current.state == UpdateState.READY) {
+        if (current.isReadyToInstall()) {
+            // Already downloaded and verified (possibly waiting for the install permission).
             installUpdate(context);
             return;
         }

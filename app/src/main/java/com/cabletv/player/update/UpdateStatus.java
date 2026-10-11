@@ -78,6 +78,15 @@ public final class UpdateStatus {
         return state == UpdateState.UPDATE_AVAILABLE && variant != null;
     }
 
+    /**
+     * A verified APK is on disk and waiting for an install. True both while the file is ready and
+     * while Android is holding the install back for permission: the permission is a detour on the
+     * same path, so granting it must not lose the download (nor require fetching it again).
+     */
+    public boolean isReadyToInstall() {
+        return apkFile != null;
+    }
+
     /** Download progress; keeps the manifest and APK choice. */
     public UpdateStatus withProgress(long downloaded, long total) {
         long size = total > 0 ? total : totalBytes;

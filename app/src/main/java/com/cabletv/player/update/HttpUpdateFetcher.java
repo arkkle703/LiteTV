@@ -6,6 +6,8 @@ import java.io.InputStream;
 import java.nio.charset.Charset;
 import java.util.concurrent.TimeUnit;
 
+import android.util.Log;
+
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -20,6 +22,7 @@ import okhttp3.Response;
  */
 public class HttpUpdateFetcher implements UpdateFetcher {
 
+    private static final String TAG = "HttpUpdateFetcher";
     private static final Charset UTF_8 = Charset.forName("UTF-8");
     private static final int MAX_REDIRECTS = 5;
     /** The manifest is a few KB; anything larger is not one. */
@@ -38,6 +41,17 @@ public class HttpUpdateFetcher implements UpdateFetcher {
 
     @Override
     public String fetch(String url) throws IOException {
+        try {
+            return fetchFollowingRedirects(url);
+        } catch (IOException e) {
+            // Worth a line of its own: "the check failed" with no reason is impossible to support
+            // when the user's network is the thing that is unusual.
+            Log.w(TAG, "Update fetch failed for " + url + ": " + e);
+            throw e;
+        }
+    }
+
+    private String fetchFollowingRedirects(String url) throws IOException {
         String current = url;
         requireAllowed(current);
         for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
