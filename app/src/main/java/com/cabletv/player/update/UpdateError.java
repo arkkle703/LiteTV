@@ -31,6 +31,12 @@ public enum UpdateError {
     STORAGE,
     /** Android refused the install: installs from this app are not allowed yet. */
     INSTALL_BLOCKED,
+    /**
+     * The system refused a session install outright even though the app is allowed to install
+     * (MIUI and some TV firmware do this: "INSTALL_FAILED_USER_RESTRICTED"). The fix is to go
+     * through the installer's own UI instead, which is where the user can approve it.
+     */
+    INSTALL_RESTRICTED,
     /** The system installer reported a failure (see the log for its own message). */
     INSTALL_FAILED,
     UNKNOWN

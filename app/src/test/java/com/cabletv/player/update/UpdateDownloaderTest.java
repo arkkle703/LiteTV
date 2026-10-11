@@ -189,6 +189,29 @@ public class UpdateDownloaderTest {
         assertEquals("nothing should have been requested", 0, mServer.requestCount());
     }
 
+    @Test
+    public void targetFile_prefersTheInternalCacheWhichNeedsNoPermission() throws Exception {
+        File target = UpdateDownloader.targetFile(mContext);
+        assertEquals("the internal cache is writable everywhere; shared storage is not",
+                mContext.getCacheDir().getAbsolutePath(), target.getParentFile().getAbsolutePath());
+    }
+
+    @Test
+    public void ensureWritable_rejectsADirectoryThatCannotBeCreated() {
+        // A path that cannot exist stands in for a shared-storage view this app may not write to.
+        File impossible = new File("/proc/litetv-not-a-directory/cache");
+        assertFalse(UpdateDownloader.ensureWritable(impossible));
+        assertFalse(UpdateDownloader.ensureWritable(null));
+    }
+
+    @Test
+    public void ensureWritable_acceptsAUsableDirectoryAndCleansUpAfterItself() {
+        File dir = new File(mContext.getCacheDir(), "probe-target");
+        assertTrue(UpdateDownloader.ensureWritable(dir));
+        assertTrue(dir.isDirectory());
+        assertEquals("the probe file must not be left behind", 0, dir.listFiles().length);
+    }
+
     private File download(byte[] body, String expectedSha) throws Exception {
         return new UpdateDownloader("http").download(mContext, mServer.url(PATH), body.length,
                 expectedSha != null ? expectedSha : sha256(body), null, new AtomicBoolean(false));

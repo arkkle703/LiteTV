@@ -148,6 +148,7 @@
     <string name="update_permission_adb_button">ADB hint</string>
     <string name="update_permission_adb">adb shell appops set com.cabletv.player REQUEST_INSTALL_PACKAGES allow</string>
     <string name="update_error_install_blocked">Android blocked the install; allow LiteTV to install updates</string>
+    <string name="update_error_install_restricted">The system blocked this install (security setting); open the installer instead, or use ADB / a USB drive</string>
     <string name="update_error_install_failed">The installer refused the update; see the log for its message</string>
     <string name="update_installing_button">Installing…</string>
 </resources>

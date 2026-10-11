@@ -29,6 +29,8 @@ public class AppConfig {
     private static final String UPDATE_AUTO_CHECK_KEY = "app_update_auto_check";
     private static final String UPDATE_LAST_CHECK_KEY = "app_update_last_check_ms";
     private static final String UPDATE_LAST_ERROR_KEY = "app_update_last_error";
+    private static final String UPDATE_PENDING_VERSION_KEY = "app_update_pending_version";
+    private static final String UPDATE_PENDING_NAME_KEY = "app_update_pending_name";
 
     private static final String DEFAULT_EPG_URL = "";
     /**
@@ -272,5 +274,27 @@ public class AppConfig {
 
     public static void setUpdateLastError(String error) {
         Hawk.put(UPDATE_LAST_ERROR_KEY, error == null ? "" : error);
+    }
+
+    /**
+     * versionCode of an update that has been downloaded and verified, so a restart does not make
+     * the screen ask for a download again. The file itself is the source of truth; this only says
+     * which version it belongs to.
+     */
+    public static int getUpdatePendingVersion() {
+        return Hawk.get(UPDATE_PENDING_VERSION_KEY, 0);
+    }
+
+    public static void setUpdatePendingVersion(int versionCode) {
+        Hawk.put(UPDATE_PENDING_VERSION_KEY, versionCode);
+    }
+
+    /** versionName that goes with {@link #getUpdatePendingVersion()}, for display. */
+    public static String getUpdatePendingName() {
+        return Hawk.get(UPDATE_PENDING_NAME_KEY, "");
+    }
+
+    public static void setUpdatePendingName(String versionName) {
+        Hawk.put(UPDATE_PENDING_NAME_KEY, versionName == null ? "" : versionName);
     }
 }

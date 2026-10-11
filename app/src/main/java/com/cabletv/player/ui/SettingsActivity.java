@@ -576,6 +576,8 @@ public class SettingsActivity extends Activity implements UpdateManager.Listener
                 return getString(R.string.update_error_install_blocked);
             case INSTALL_FAILED:
                 return getString(R.string.update_error_install_failed);
+            case INSTALL_RESTRICTED:
+                return getString(R.string.update_error_install_restricted);
             default:
                 return getString(R.string.update_error_unknown);
         }

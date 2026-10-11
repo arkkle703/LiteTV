@@ -60,6 +60,31 @@ public class ApkInstallerTest {
     }
 
     @Test
+    public void errorForStatus_readsVendorRestrictionsFromTheMessage() {
+        // MIUI reports its install restriction as a plain STATUS_FAILURE_INCOMPATIBLE; the message
+        // is the only place that says what actually happened (found on a MiTV).
+        assertEquals(UpdateError.INSTALL_RESTRICTED, ApkInstaller.errorForStatus(
+                PackageInstaller.STATUS_FAILURE_INCOMPATIBLE,
+                "INSTALL_FAILED_USER_RESTRICTED: Failed INSTALL_CANCELED_BY_USER"));
+        assertEquals("a code with no message keeps its usual meaning",
+                UpdateError.INSTALL_FAILED,
+                ApkInstaller.errorForStatus(PackageInstaller.STATUS_FAILURE_INCOMPATIBLE, null));
+    }
+
+    @Test
+    public void installerUiFallback_isOfferedForPolicyFailuresOnly() {
+        // A user who cancelled must not be asked twice, and a file the installer rejected as
+        // invalid must never be offered again.
+        assertTrue(ApkInstaller.canFallBackToInstaller(UpdateError.INSTALL_RESTRICTED));
+        assertTrue(ApkInstaller.canFallBackToInstaller(UpdateError.INSTALL_BLOCKED));
+        assertTrue(ApkInstaller.canFallBackToInstaller(UpdateError.INSTALL_FAILED));
+        assertFalse(ApkInstaller.canFallBackToInstaller(UpdateError.CANCELLED));
+        assertFalse(ApkInstaller.canFallBackToInstaller(UpdateError.CHECKSUM));
+        assertFalse(ApkInstaller.canFallBackToInstaller(UpdateError.SIGNATURE));
+        assertFalse(ApkInstaller.canFallBackToInstaller(UpdateError.STORAGE));
+    }
+
+    @Test
     @Config(sdk = Build.VERSION_CODES.LOLLIPOP)
     public void canRequestInstall_isAlwaysTrueBeforeAndroid8() {
         // Pre-8 devices use a device-wide "unknown sources" toggle that apps cannot read.
@@ -107,6 +132,33 @@ public class ApkInstallerTest {
                 (started.getFlags() & Intent.FLAG_ACTIVITY_NEW_TASK) != 0);
         assertTrue("without the read grant the installer cannot open the file",
                 (started.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0);
+    }
+
+    @Test
+    @Config(sdk = Build.VERSION_CODES.LOLLIPOP)
+    public void installUri_usesFileSchemeBelowAndroid7() throws IOException {
+        // MIUI on Android 6 resolves only file:// install intents; the content form finds no
+        // handler at all there (observed on a MiTV).
+        File apk = new File(mContext.getCacheDir(), "update.apk");
+        try (FileOutputStream out = new FileOutputStream(apk)) {
+            out.write(new byte[]{1});
+        }
+        Uri uri = ApkInstaller.installUri(mContext, apk);
+        assertEquals("file", uri.getScheme());
+        assertTrue("the installer runs as another user id and must be able to read it",
+                apk.canRead());
+    }
+
+    @Test
+    @Config(sdk = Build.VERSION_CODES.N)
+    public void installUri_usesTheProviderFromAndroid7On() throws IOException {
+        File apk = new File(mContext.getCacheDir(), "update.apk");
+        try (FileOutputStream out = new FileOutputStream(apk)) {
+            out.write(new byte[]{1});
+        }
+        Uri uri = ApkInstaller.installUri(mContext, apk);
+        assertEquals("content", uri.getScheme());
+        assertEquals(mContext.getPackageName() + ".fileprovider", uri.getAuthority());
     }
 
     @Test

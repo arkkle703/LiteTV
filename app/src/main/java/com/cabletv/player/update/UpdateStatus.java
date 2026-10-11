@@ -34,20 +34,32 @@ public final class UpdateStatus {
     private final UpdateManifest manifest;
 
     private UpdateStatus(UpdateState state, UpdateError error, UpdateManifest manifest,
-                         UpdateManifest.Variant variant, long downloadedBytes, long totalBytes,
-                         File apkFile, long checkedAtMs) {
+                         int latestVersionCode, String latestVersionName, List<String> changelog,
+                         String releaseUrl, UpdateManifest.Variant variant, long downloadedBytes,
+                         long totalBytes, File apkFile, long checkedAtMs) {
         this.state = state;
         this.error = error;
         this.manifest = manifest;
-        this.latestVersionCode = manifest != null ? manifest.versionCode : 0;
-        this.latestVersionName = manifest != null ? manifest.versionName : null;
-        this.changelog = manifest != null ? manifest.changelogLines() : Collections.<String>emptyList();
-        this.releaseUrl = manifest != null ? manifest.releaseUrl : null;
+        this.latestVersionCode = latestVersionCode;
+        this.latestVersionName = latestVersionName;
+        this.changelog = changelog;
+        this.releaseUrl = releaseUrl;
         this.variant = variant;
         this.downloadedBytes = downloadedBytes;
         this.totalBytes = totalBytes;
         this.apkFile = apkFile;
         this.checkedAtMs = checkedAtMs;
+    }
+
+    private UpdateStatus(UpdateState state, UpdateError error, UpdateManifest manifest,
+                         UpdateManifest.Variant variant, long downloadedBytes, long totalBytes,
+                         File apkFile, long checkedAtMs) {
+        this(state, error, manifest,
+                manifest != null ? manifest.versionCode : 0,
+                manifest != null ? manifest.versionName : null,
+                manifest != null ? manifest.changelogLines() : Collections.<String>emptyList(),
+                manifest != null ? manifest.releaseUrl : null,
+                variant, downloadedBytes, totalBytes, apkFile, checkedAtMs);
     }
 
     public static UpdateStatus idle() {
@@ -72,6 +84,16 @@ public final class UpdateStatus {
 
     public static UpdateStatus error(UpdateError error, long nowMs) {
         return error(error, null, nowMs);
+    }
+
+    /**
+     * A verified APK that outlived the process that downloaded it. Only its version and file are
+     * known — the manifest is gone — so the changelog stays empty until the next check fills it in.
+     */
+    public static UpdateStatus readyFromCache(int versionCode, String versionName, File apk) {
+        return new UpdateStatus(UpdateState.READY, UpdateError.NONE, null,
+                versionCode, versionName == null ? "" : versionName,
+                Collections.<String>emptyList(), null, null, 0L, 0L, apk, 0L);
     }
 
     public boolean isUpdateAvailable() {

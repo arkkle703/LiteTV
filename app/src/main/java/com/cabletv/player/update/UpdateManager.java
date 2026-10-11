@@ -13,6 +13,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * The one place that knows how to check for updates. A single long-lived instance owns the current
@@ -45,6 +46,8 @@ public class UpdateManager {
     private volatile boolean mInstallWhenReady;
 
     private volatile UpdateStatus mStatus = UpdateStatus.idle();
+    /** Bumped on every publish, so a slow check can tell that its result is already stale. */
+    private final AtomicLong mStateVersion = new AtomicLong();
 
     /** Visible for tests, which inject a checker backed by a stub fetcher. */
     UpdateManager(UpdateChecker checker) {
@@ -94,6 +97,9 @@ public class UpdateManager {
      * fails silently — a check the user did not ask for must never interrupt them.
      */
     public void scheduleStartupCheck(Context context) {
+        // A verified download outlives the process, so it is offered before anything is asked of
+        // the network: the television is usually restarted between checking and installing.
+        restorePendingDownload(context);
         if (!AppConfig.isUpdateAutoCheckEnabled()) {
             Log.d(TAG, "Automatic update check is disabled");
             return;
@@ -138,6 +144,8 @@ public class UpdateManager {
      * top of each other. Blocking; the caller is either the update thread or a web worker.
      */
     private synchronized UpdateStatus performCheck(Context appContext) {
+        UpdateStatus previous = mStatus;
+        long versionAtStart = mStateVersion.get();
         publish(UpdateStatus.checking());
         UpdateStatus status;
         try {
@@ -149,6 +157,8 @@ public class UpdateManager {
             Log.e(TAG, "Update check threw", e);
             status = UpdateStatus.error(UpdateError.UNKNOWN, System.currentTimeMillis());
         }
+        status = keepVerifiedDownload(status, previous);
+        status = restoreVerifiedDownload(status, appContext);
         // Stamp the attempt even when it failed: a failing check must not retry on every launch.
         AppConfig.setUpdateLastCheckMs(System.currentTimeMillis());
         AppConfig.setUpdateLastError(status.error == UpdateError.NONE ? "" : status.error.name());
@@ -157,6 +167,13 @@ public class UpdateManager {
         } else {
             Log.i(TAG, "Update check: " + status.state
                     + (status.latestVersionName != null ? " (latest " + status.latestVersionName + ")" : ""));
+        }
+        if (mStateVersion.get() != versionAtStart) {
+            // A download finished, or an install was handed over, while this check was in flight.
+            // That newer state is the truth; publishing this result would roll it back (this is
+            // exactly how a finished install ended up looking like "installing").
+            Log.i(TAG, "Update check finished late; keeping the newer state " + mStatus.state);
+            return status;
         }
         publish(status);
         return status;
@@ -229,6 +246,8 @@ public class UpdateManager {
             }
             Log.i(TAG, "APK verified and ready to install: " + apk);
             AppConfig.setUpdateLastError("");
+            AppConfig.setUpdatePendingVersion(expectedVersionCode);
+            AppConfig.setUpdatePendingName(before.latestVersionName);
             publish(before.toReady(apk));
             if (mInstallWhenReady) {
                 // The web page asked for the whole flow; carry on to the installer prompt.
@@ -249,6 +268,68 @@ public class UpdateManager {
             Log.e(TAG, "Download threw", e);
             fail(before, UpdateError.UNKNOWN);
         }
+    }
+
+    /**
+     * A check that finds the same version must not throw away an already verified download: the
+     * download is the slow part, and the user would be told to fetch something they already have.
+     * The remembered state is kept instead, so the screen still offers the install (or still asks
+     * for the install permission) rather than starting over.
+     */
+    static UpdateStatus keepVerifiedDownload(UpdateStatus fresh, UpdateStatus previous) {
+        if (fresh.state != UpdateState.UPDATE_AVAILABLE || previous == null
+                || !isVerifiedWaiting(previous)
+                || previous.latestVersionCode != fresh.latestVersionCode
+                || previous.apkFile == null || !previous.apkFile.isFile()) {
+            return fresh;
+        }
+        return previous;
+    }
+
+    /**
+     * True for the states that mean "a verified APK is waiting for the user": ready to install, or
+     * held back for permission. INSTALLING is deliberately excluded — it describes a handover that
+     * is over by the time a later check returns, and keeping it would resurrect a state the screen
+     * would then sit in.
+     */
+    private static boolean isVerifiedWaiting(UpdateStatus status) {
+        return (status.state == UpdateState.READY || status.state == UpdateState.NEEDS_PERMISSION)
+                && status.isReadyToInstall();
+    }
+
+    /** Puts a downloaded-but-uninstalled update back on offer without touching the network. */
+    private void restorePendingDownload(Context context) {
+        int pending = AppConfig.getUpdatePendingVersion();
+        if (pending <= 0) {
+            return;
+        }
+        File apk = UpdateDownloader.targetFile(context);
+        if (!apk.isFile()) {
+            // The cache was cleared (or the system reclaimed it); forget the claim.
+            AppConfig.setUpdatePendingVersion(0);
+            AppConfig.setUpdatePendingName("");
+            return;
+        }
+        publish(UpdateStatus.readyFromCache(pending, AppConfig.getUpdatePendingName(), apk));
+    }
+
+    /**
+     * The same idea as {@link #keepVerifiedDownload} but across a restart: a verified APK is still
+     * in the cache, so the offer stays "install" instead of "download" even though this process
+     * has no memory of downloading it.
+     */
+    static UpdateStatus restoreVerifiedDownload(UpdateStatus fresh, Context context) {
+        if (fresh.state != UpdateState.UPDATE_AVAILABLE
+                || AppConfig.getUpdatePendingVersion() != fresh.latestVersionCode) {
+            return fresh;
+        }
+        File apk = UpdateDownloader.targetFile(context);
+        if (!apk.isFile()) {
+            // The cache was cleared (or the system reclaimed it); forget the claim.
+            AppConfig.setUpdatePendingVersion(0);
+            return fresh;
+        }
+        return fresh.toReady(apk);
     }
 
     private void publishProgress(long downloaded, long total) {
@@ -297,8 +378,18 @@ public class UpdateManager {
                 Log.i(TAG, "Update installed; the system restarts the app");
                 publish(current.readyAgain(UpdateError.NONE));
                 break;
+            case HANDED_OVER:
+                // The installer UI is on screen but this path reports nothing back, so the app
+                // cannot know whether the user went through with it. Leaving the state at
+                // "installing" would strand the screen on "waiting for the installer" if they
+                // cancel; going back to "ready" is right either way, because a successful install
+                // kills this process anyway.
+                Log.i(TAG, "Install handed to the system installer; no result will follow");
+                publish(current.readyAgain(UpdateError.NONE));
+                break;
             default:
-                // PENDING_USER_ACTION and HANDED_OVER both mean "waiting on the installer".
+                // PENDING_USER_ACTION means the session is waiting for the user's answer, which
+                // arrives as another status broadcast.
                 break;
         }
     }

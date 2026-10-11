@@ -84,13 +84,53 @@ public class UpdateDownloader {
         mClient = builder.build();
     }
 
-    /** Where the download lives. External cache first: it is bigger and never needs a permission. */
+    /**
+     * Where the download lives: the app's own cache directory.
+     *
+     * <p>The internal cache is used first because it is writable on every supported release with no
+     * permission at all. The external cache directory is not: a ROM that mounts apps without
+     * {@code WRITE_EXTERNAL_STORAGE} into the read-only view of shared storage (the MiTV Android 6
+     * build does exactly that) lets the directory be created and then refuses every file in it, so
+     * a download there fails as "cannot open …​.part". On the devices seen so far both live on the
+     * same partition anyway, so nothing is given up.
+     */
     public static File targetFile(Context context) {
-        File dir = context.getExternalCacheDir();
-        if (dir == null) {
-            dir = context.getCacheDir();
+        File internal = context.getCacheDir();
+        if (ensureWritable(internal)) {
+            return new File(internal, TARGET_NAME);
         }
-        return new File(dir, TARGET_NAME);
+        File external = context.getExternalCacheDir();
+        if (ensureWritable(external)) {
+            return new File(external, TARGET_NAME);
+        }
+        // Nothing probed clean; hand back the internal path so the failure names a real location.
+        Log.w(TAG, "No writable cache directory found; falling back to " + internal);
+        return new File(internal, TARGET_NAME);
+    }
+
+    /** Creates the directory when needed and proves a file can actually be written to it. */
+    static boolean ensureWritable(File dir) {
+        if (dir == null) {
+            return false;
+        }
+        if (!dir.isDirectory() && !dir.mkdirs() && !dir.isDirectory()) {
+            return false;
+        }
+        File probe = new File(dir, "write-probe.tmp");
+        FileOutputStream out = null;
+        try {
+            out = new FileOutputStream(probe);
+            out.write(1);
+            return true;
+        } catch (IOException e) {
+            Log.w(TAG, "Cache directory is not writable: " + dir, e);
+            return false;
+        } finally {
+            closeQuietly(out);
+            if (probe.exists() && !probe.delete()) {
+                Log.d(TAG, "Could not remove the write probe " + probe);
+            }
+        }
     }
 
     /**
@@ -220,7 +260,9 @@ public class UpdateDownloader {
         try {
             out = new FileOutputStream(part, append);
         } catch (IOException e) {
-            throw new DownloadException(UpdateError.STORAGE, "cannot open " + part, e);
+            Log.w(TAG, "Cannot open the download file " + part, e);
+            throw new DownloadException(UpdateError.STORAGE,
+                    "cannot open " + part + ": " + e, e);
         }
         try {
             int read;
@@ -247,7 +289,9 @@ public class UpdateDownloader {
                 try {
                     out.write(buffer, 0, read);
                 } catch (IOException e) {
-                    throw new DownloadException(UpdateError.STORAGE, "cannot write " + part, e);
+                    Log.w(TAG, "Cannot write to " + part, e);
+                    throw new DownloadException(UpdateError.STORAGE,
+                            "cannot write " + part + ": " + e, e);
                 }
                 long now = System.currentTimeMillis();
                 if (progress != null && now - lastReport >= PROGRESS_INTERVAL_MS) {
@@ -259,8 +303,7 @@ public class UpdateDownloader {
                 out.flush();
             } catch (IOException e) {
                 throw new DownloadException(UpdateError.STORAGE, "cannot flush " + part, e);
-            }
-        } finally {
+            }        } finally {
             closeQuietly(out);
         }
         if (progress != null) {

@@ -67,6 +67,9 @@ public final class ApkInstaller {
     private static BroadcastReceiver sReceiver;
     private static Callback sCallback;
     private static UpdateError sLastError = UpdateError.NONE;
+    /** The APK of the install in flight, kept so the installer UI can be offered as a fallback. */
+    private static File sPendingApk;
+    private static boolean sTriedInstallerUi;
 
     private ApkInstaller() {
     }
@@ -122,12 +125,15 @@ public final class ApkInstaller {
         Context appContext = context.getApplicationContext();
         sCallback = callback;
         sLastError = UpdateError.NONE;
+        sPendingApk = apk;
+        sTriedInstallerUi = false;
         try {
             installThroughSession(appContext, apk);
         } catch (Exception e) {
             // Session installs are unavailable on some firmware; the plain install intent works
             // there, at the price of getting no result back.
             Log.w(TAG, "PackageInstaller session failed, falling back to the install intent", e);
+            sTriedInstallerUi = true;
             if (openInstaller(appContext, apk)) {
                 callback.onInstallStatus(InstallStatus.HANDED_OVER);
             } else {
@@ -188,13 +194,13 @@ public final class ApkInstaller {
      */
     static boolean openInstaller(Context context, File apk) {
         try {
-            Uri uri = FileProvider.getUriForFile(context,
-                    context.getPackageName() + ".fileprovider", apk);
             Intent intent = new Intent(Intent.ACTION_VIEW);
-            intent.setDataAndType(uri, "application/vnd.android.package-archive");
-            // Both flags are required: NEW_TASK because this runs from the application context, and
-            // the read grant because the installer is a different app.
-            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.setDataAndType(installUri(context, apk), "application/vnd.android.package-archive");
+            // NEW_TASK because this runs from the application context; the read grant because on
+            // Android 7+ the installer reads the file through our provider rather than directly.
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                    | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N
+                    ? Intent.FLAG_GRANT_READ_URI_PERMISSION : 0));
             context.startActivity(intent);
             return true;
         } catch (Exception e) {
@@ -203,6 +209,27 @@ public final class ApkInstaller {
             Log.w(TAG, "No installer could be opened for " + apk, e);
             return false;
         }
+    }
+
+    /**
+     * How the installer should be handed the file.
+     *
+     * <p>Android 7 and newer require a content URI (a {@code file://} one throws), so the provider
+     * serves it and the read grant travels with the intent. Below 7 those APIs do not exist and the
+     * installer reads the path itself — and some vendor firmware (MIUI on Android 6, which is what
+     * a MiTV runs) resolves <em>only</em> {@code file://} install intents and refuses the content
+     * form outright, so the classic form is the one that works there.
+     */
+    static Uri installUri(Context context, File apk) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            return FileProvider.getUriForFile(context,
+                    context.getPackageName() + ".fileprovider", apk);
+        }
+        // The installer runs as another user id; without this it cannot open the downloaded file.
+        if (!apk.setReadable(true, false)) {
+            Log.w(TAG, "Could not make the download readable: " + apk);
+        }
+        return Uri.fromFile(apk);
     }
 
     private static synchronized void registerStatusReceiver(Context context) {
@@ -251,16 +278,51 @@ public final class ApkInstaller {
                 notifyCallback(callback, InstallStatus.SUCCEEDED);
                 return;
             default:
-                sLastError = errorForStatus(status);
+                sLastError = errorForStatus(status, message);
+                // Some firmware refuses a session install but is perfectly happy to install the
+                // same file through its own installer UI, where the user gets to approve it (this
+                // is what MIUI does: "INSTALL_FAILED_USER_RESTRICTED"). Offer that once instead of
+                // dead-ending on a message the user cannot act on.
+                if (canFallBackToInstaller(sLastError) && !sTriedInstallerUi) {
+                    sTriedInstallerUi = true;
+                    Log.i(TAG, "Retrying through the installer UI");
+                    if (openInstaller(context, sPendingApk)) {
+                        unregisterStatusReceiver(context);
+                        sCallback = null;
+                        notifyCallback(callback, InstallStatus.HANDED_OVER);
+                        return;
+                    }
+                }
                 unregisterStatusReceiver(context);
                 sCallback = null;
                 notifyCallback(callback, InstallStatus.FAILED);
         }
     }
 
+    /**
+     * Whether a failed session install is worth retrying through the installer UI. A user who
+     * cancelled is asked once, not twice, and a file the installer called invalid is not shown
+     * again at all.
+     */
+    static boolean canFallBackToInstaller(UpdateError error) {
+        switch (error) {
+            case INSTALL_RESTRICTED:
+            case INSTALL_BLOCKED:
+            case INSTALL_FAILED:
+            case UNKNOWN:
+                return true;
+            default:
+                return false;
+        }
+    }
+
     private static void notifyCallback(Callback callback, InstallStatus status) {
         if (callback != null) {
             callback.onInstallStatus(status);
+        }
+        if (status == InstallStatus.SUCCEEDED || status == InstallStatus.FAILED) {
+            sPendingApk = null;
+            sTriedInstallerUi = false;
         }
     }
 
@@ -281,6 +343,16 @@ public final class ApkInstaller {
 
     /** Turns an installer status code into something the update screen can explain. */
     static UpdateError errorForStatus(int status) {
+        return errorForStatus(status, null);
+    }
+
+    static UpdateError errorForStatus(int status, String message) {
+        // The installer's own message is the reliable part on vendor firmware: MIUI reports its
+        // permission problem as a plain STATUS_FAILURE_INCOMPATIBLE, and only the text says why.
+        String text = message == null ? "" : message;
+        if (text.contains("USER_RESTRICTED") || text.contains("RESTRICTED")) {
+            return UpdateError.INSTALL_RESTRICTED;
+        }
         switch (status) {
             case PackageInstaller.STATUS_FAILURE_BLOCKED:
                 return UpdateError.INSTALL_BLOCKED;

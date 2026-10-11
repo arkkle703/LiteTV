@@ -148,6 +148,7 @@
     <string name="update_permission_adb_button">ADB 方式</string>
     <string name="update_permission_adb">adb shell appops set com.cabletv.player REQUEST_INSTALL_PACKAGES allow</string>
     <string name="update_error_install_blocked">系统阻止了安装：请允许 LiteTV 安装更新</string>
+    <string name="update_error_install_restricted">系统安全设置阻止了本次安装；可改用系统安装界面、ADB 或 U 盘安装</string>
     <string name="update_error_install_failed">安装器拒绝了更新，详细原因见日志</string>
     <string name="update_installing_button">安装中…</string>
 </resources>
