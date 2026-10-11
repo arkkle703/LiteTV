@@ -380,6 +380,28 @@ public class SettingsActivity extends Activity implements UpdateManager.Listener
         }
     }
 
+    /**
+     * BACK returns to the player rather than letting the task end.
+     *
+     * <p>Relying on the player still being behind this screen does not hold on every television:
+     * the MiTV's task manager reaps the background player while the settings screen is in front, so
+     * finishing here dropped the viewer onto the launcher, which reads as "the app quit". Raising
+     * the player explicitly makes the path identical everywhere — an existing player comes back to
+     * the front, otherwise one is created and resumes the last channel.
+     */
+    @Override
+    public void onBackPressed() {
+        Log.i(TAG, "Back pressed: returning to the player");
+        try {
+            startActivity(new Intent(this, MainActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP));
+        } catch (Exception e) {
+            // Never let this turn a "go back" into a crash; the task still closes below.
+            Log.w(TAG, "Cannot raise the player; closing instead", e);
+        }
+        finish();
+    }
+
     @Override
     protected void onResume() {
         super.onResume();

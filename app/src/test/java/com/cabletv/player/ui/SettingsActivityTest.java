@@ -118,6 +118,20 @@ public class SettingsActivityTest {
     }
 
     @Test
+    public void backReturnsToThePlayerInsteadOfEndingTheTask() {
+        // On televisions whose task manager reaps the background player (the MiTV does), finishing
+        // the settings screen used to land the viewer on the launcher, as if the app had quit.
+        SettingsActivity activity = buildActivity();
+        activity.onBackPressed();
+
+        Intent started = shadowOf(activity).getNextStartedActivity();
+        assertNotNull("BACK must raise the player", started);
+        assertNotNull(started.getComponent());
+        assertEquals(MainActivity.class.getName(), started.getComponent().getClassName());
+        assertTrue("the settings screen itself still closes", activity.isFinishing());
+    }
+
+    @Test
     public void updateSection_showsVersionAndShipsAutoCheckOn() {
         AppConfig.setUpdateAutoCheckEnabled(true);
         SettingsActivity activity = buildActivity();

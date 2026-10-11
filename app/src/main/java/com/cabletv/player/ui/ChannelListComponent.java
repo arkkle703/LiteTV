@@ -481,18 +481,38 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         return best;
     }
 
-    /** Moves the guide to the previous/next day that has data for the selected channel. */
-    public void moveProgramDay(int delta) {
-        if (mAvailableDayOffsets.isEmpty()) {
-            return;
-        }
-        int index = mAvailableDayOffsets.indexOf(mDayOffset);
-        int next = Math.max(0, Math.min(mAvailableDayOffsets.size() - 1, index + delta));
-        if (next == index) {
-            return;
+    /**
+     * Moves the guide to the previous/next day that has data for the selected channel.
+     *
+     * @return true when the day actually changed, false when there is no day that way (the caller
+     *         lets the focus leave the column then, instead of leaving LEFT looking like a dead key)
+     */
+    public boolean moveProgramDay(int delta) {
+        int next = nextDayIndex(mAvailableDayOffsets, mDayOffset, delta);
+        if (next < 0) {
+            return false;
         }
         mDayOffset = mAvailableDayOffsets.get(next);
         refreshProgramListForCurrentSelection();
+        return true;
+    }
+
+    /**
+     * Index of the day a step would land on, or -1 when the step changes nothing (no days at all,
+     * or already at that end). Kept separate from the list handling so the boundary is testable.
+     */
+    static int nextDayIndex(java.util.List<Integer> availableDays, int currentOffset, int delta) {
+        if (availableDays == null || availableDays.isEmpty()) {
+            return -1;
+        }
+        int index = availableDays.indexOf(currentOffset);
+        if (index < 0) {
+            // The selection is not one of the days on offer (the data moved on); stepping has no
+            // meaningful target, so it reports "no move" rather than jumping somewhere.
+            return -1;
+        }
+        int next = Math.max(0, Math.min(availableDays.size() - 1, index + delta));
+        return next == index ? -1 : next;
     }
 
     private void updateProgramTitle() {
@@ -639,16 +659,33 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         }
     }
 
-    public void moveProgramSelection(boolean down) {
+    /**
+     * Moves the cursor inside the programme column.
+     *
+     * @return true when the cursor moved, false when it was already at that end — the caller then
+     *         treats the step as running off the list (which pages the guide to another day)
+     */
+    public boolean moveProgramSelection(boolean down) {
         RecyclerView.Adapter<?> adapter = mProgramRecyclerView.getAdapter();
-        if (mFocusPanel != FocusPanel.PROGRAMS || adapter == null) return;
+        if (mFocusPanel != FocusPanel.PROGRAMS || adapter == null) return false;
         int count = adapter.getItemCount();
-        if (count == 0) return;
+        if (count == 0) return false;
         int newIndex = Math.max(0, Math.min(count - 1, mSelectedProgramIndex + (down ? 1 : -1)));
-        if (newIndex == mSelectedProgramIndex) return;
+        if (newIndex == mSelectedProgramIndex) return false;
         mSelectedProgramIndex = newIndex;
         ((ProgramListAdapter) adapter).setSelectedIndex(newIndex);
         scrollToCentered(mProgramRecyclerView, newIndex, PROGRAM_ROW_HEIGHT_DP);
+        return true;
+    }
+
+    /** Puts the cursor on the first or the last programme of the day currently shown. */
+    public void selectProgramEdge(boolean first) {
+        RecyclerView.Adapter<?> adapter = mProgramRecyclerView.getAdapter();
+        if (adapter == null || adapter.getItemCount() == 0) return;
+        int index = first ? 0 : adapter.getItemCount() - 1;
+        mSelectedProgramIndex = index;
+        ((ProgramListAdapter) adapter).setSelectedIndex(index);
+        scrollToCentered(mProgramRecyclerView, index, PROGRAM_ROW_HEIGHT_DP);
     }
 
     @Override

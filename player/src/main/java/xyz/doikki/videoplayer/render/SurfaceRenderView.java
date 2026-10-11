@@ -3,6 +3,7 @@ package xyz.doikki.videoplayer.render;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.util.Log;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
@@ -36,6 +37,8 @@ import xyz.doikki.videoplayer.player.AbstractPlayer;
 @SuppressLint("ViewConstructor")
 public class SurfaceRenderView extends SurfaceView implements IRenderView, SurfaceHolder.Callback {
 
+    private static final String TAG = "SurfaceRenderView";
+
     private final MeasureHelper mMeasureHelper = new MeasureHelper();
 
     @Nullable
@@ -44,6 +47,30 @@ public class SurfaceRenderView extends SurfaceView implements IRenderView, Surfa
     public SurfaceRenderView(Context context) {
         super(context);
         getHolder().addCallback(this);
+    }
+
+    /**
+     * Swallows a framework crash that Android 6 throws whenever this view's window becomes visible
+     * again after another activity covered it.
+     *
+     * <p>{@code SurfaceView.updateWindow()} dereferences its {@code IWindowSession} without a null
+     * check on those releases; the session is already gone once the window has been hidden, so the
+     * traversal that makes the player visible again dies with
+     * {@code NullPointerException: ... IWindowSession.finishDrawing ... on a null object reference},
+     * taking the whole process with it. Seen on a MiTV 4 (Android 6): leaving the settings screen
+     * crashed the app back to the launcher, and no code of ours was on the stack.
+     *
+     * <p>Catching it is the only place the app can intervene — the throw happens inside the
+     * framework's own traversal. The surface is re-created on the next layout pass, which is why
+     * the picture comes back rather than staying blank.
+     */
+    @Override
+    protected void onWindowVisibilityChanged(int visibility) {
+        try {
+            super.onWindowVisibilityChanged(visibility);
+        } catch (NullPointerException e) {
+            Log.w(TAG, "Ignoring the platform SurfaceView bug while becoming visible", e);
+        }
     }
 
     @Override

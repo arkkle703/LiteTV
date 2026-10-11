@@ -927,7 +927,16 @@ public class MainActivity extends Activity {
     private void moveSelectionInList(boolean down) {
         switch (mChannelListComponent.getFocusPanel()) {
             case PROGRAMS:
-                mChannelListComponent.moveProgramSelection(down);
+                if (!mChannelListComponent.moveProgramSelection(down)) {
+                    // The cursor ran off an end of the day: page the guide that way, which is how
+                    // the viewer reaches earlier days now that LEFT belongs to the column layout.
+                    if (mChannelListComponent.moveProgramDay(down ? 1 : -1)) {
+                        Log.d(TAG, "moveSelectionInList: paged the guide to another day");
+                        // Land where the movement was heading: stepping up past the top of a day
+                        // continues at the bottom of the previous one, and the other way round.
+                        mChannelListComponent.selectProgramEdge(down);
+                    }
+                }
                 break;
             case GROUPS:
                 mChannelListComponent.moveGroupSelection(down);
@@ -984,10 +993,13 @@ public class MainActivity extends Activity {
             }
             return;
         }
-        // Inside the programme column, LEFT pages the guide one day back instead of leaving the
-        // column; BACK (or the nearest-day boundary) folds back to the channels.
+        // Inside the programme column, LEFT leaves it the same way BACK does. Day stepping lives on
+        // the list's own ends instead (see moveSelectionInList), because a viewer pressing LEFT
+        // expects to go back to the channels — and on most channels the guide only has today, where
+        // paging back did nothing at all and LEFT looked broken.
         if (mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.PROGRAMS) {
-            mChannelListComponent.moveProgramDay(-1);
+            Log.d(TAG, "handleFocusLeft: leaving the programme column");
+            mChannelListComponent.moveFocusToChannels();
             return;
         }
         Log.d(TAG, "handleFocusLeft: Moving focus to groups");
