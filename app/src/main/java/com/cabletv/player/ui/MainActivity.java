@@ -1089,6 +1089,17 @@ public class MainActivity extends Activity {
         mChannelListComponent.setProgramFocusTime(focusTime);
     }
 
+    /**
+     * The group the channel list should open on.
+     *
+     * @param browsedGroup            the group last browsed in the list, or -1 for none
+     * @param browsedHoldsPlayingChan whether that group still contains the channel being watched
+     * @param walkingGroup            the group the channel up/down keys are stepping through
+     */
+    static int groupToOpenOn(int browsedGroup, boolean browsedHoldsPlayingChan, int walkingGroup) {
+        return browsedGroup >= 0 && browsedHoldsPlayingChan ? browsedGroup : walkingGroup;
+    }
+
     private void showChannelList() {
         if (mChannelListComponent == null) {
             mChannelListComponent = new ChannelListComponent(this, mNavigator);
@@ -1140,8 +1151,15 @@ public class MainActivity extends Activity {
             // The viewer may have changed the opacity in the settings since the menu was built
             mChannelListComponent.applyOpacity();
             mChannelListComponent.setCurrentChannel(mCurrentChannelIndex);
-            // Open on the group the channel keys are walking, with the playing channel highlighted
-            mChannelListComponent.showGroup(mNavigator.currentGroupIndex(), mCurrentChannelIndex);
+            // Reopen where the viewer left off: the group they last browsed while it still holds the
+            // playing channel (so the highlight is there to see), otherwise the group the channel
+            // keys are walking. Always using the walking group threw away a group the viewer had
+            // deliberately picked — choosing 全部频道 and reopening dropped them back into CCTV.
+            int browsedGroup = mChannelListComponent.getBrowsedGroupIndex();
+            int groupToOpen = groupToOpenOn(browsedGroup,
+                    browsedGroup >= 0 && mNavigator.positionOf(browsedGroup, mCurrentChannelIndex) >= 0,
+                    mNavigator.currentGroupIndex());
+            mChannelListComponent.showGroup(groupToOpen, mCurrentChannelIndex);
             mChannelListComponent.moveFocusToChannels();
             // Re-aim the guide every time the list opens: the programme that aired when the list
             // was last prepared may be over by now, which is what made the guide open on the wrong
