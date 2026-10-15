@@ -625,7 +625,10 @@ public class EpgManager {
                 text.append(parser.getText());
             }
         }
-        return text.toString().trim();
+        // The parser resolved the XML layer; feeds that escaped their text before writing the XML
+        // leave a second layer behind (一起&amp;apos;趣... arrives as 一起&apos;趣...), so the text
+        // is normalised here, at the one place XMLTV text is read.
+        return com.cabletv.player.util.HtmlEntities.decode(text.toString().trim());
     }
 
     // -------------------------------------------------------- channel matching
@@ -862,7 +865,8 @@ public class EpgManager {
                 continue;
             }
             JsonObject item = items.get(i).getAsJsonObject();
-            String title = firstNonEmpty(item, "节目名", "title", "name", "programName");
+            String title = com.cabletv.player.util.HtmlEntities.decode(
+                    firstNonEmpty(item, "节目名", "title", "name", "programName"));
             if (title == null) {
                 continue;
             }
