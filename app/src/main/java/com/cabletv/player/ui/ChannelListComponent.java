@@ -1278,7 +1278,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                 this.container = itemView;
 
                 timeView = new TextView(context);
-                timeView.setTextColor(0xFF888888);
+                timeView.setTextColor(ProgramViewHolder.TIME_NORMAL);
                 timeView.setTextSize(11);
                 timeView.setSingleLine(true);
                 timeView.setLayoutParams(new LinearLayout.LayoutParams(
@@ -1343,11 +1343,16 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                             .start();
                 }
 
-                // Mark currently broadcasting program with visual indicator (optional prefix or color)
-                if (isCurrentProgram) {
-                    timeView.setTextColor(0xFFFF9966);
-                }
+                // The time is coloured on every bind, not only when the programme is current: rows
+                // come from a recycled pool, so a view that once showed the programme airing now
+                // would keep the highlight for whatever it is bound to next — which is how several
+                // rows in one guide ended up looking "current" at once.
+                timeView.setTextColor(isCurrentProgram ? TIME_CURRENT : TIME_NORMAL);
             }
+
+            /** Colour of a time stamp: the programme on air is picked out; the rest stay quiet. */
+            static final int TIME_CURRENT = 0xFFFF9966;
+            static final int TIME_NORMAL = 0xFF888888;
 
             private int dp2px(int dp) {
                 return Math.round(context.getResources().getDisplayMetrics().density * dp);
