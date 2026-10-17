@@ -925,15 +925,15 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                 nameView.setText(label + " (" + channelCount + ")");
                 if (isSelected && focused) {
                     nameView.setTextColor(0xFFFF6B35);
-                    nameView.setTextSize(15);
+                    nameView.setTextSize(17);
                     nameView.setBackgroundResource(R.drawable.channel_item_selected_bg);
                 } else if (isSelected) {
                     nameView.setTextColor(0xFFFF9966);
-                    nameView.setTextSize(14);
+                    nameView.setTextSize(16);
                     nameView.setBackgroundResource(R.drawable.channel_item_selected_dim_bg);
                 } else {
                     nameView.setTextColor(0xFFCCCCCC);
-                    nameView.setTextSize(14);
+                    nameView.setTextSize(16);
                     nameView.setBackgroundColor(0x00000000);
                 }
             }
@@ -1058,7 +1058,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                 // The number the viewer can type on the remote to reach this channel
                 numberView = new TextView(context);
                 numberView.setTextColor(0xFF888888);
-                numberView.setTextSize(11);
+                numberView.setTextSize(12);
                 numberView.setSingleLine(true);
                 numberView.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
                 numberView.setLayoutParams(new LinearLayout.LayoutParams(
@@ -1087,7 +1087,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
 
                 nameView = new TextView(context);
                 nameView.setTextColor(0xFFCCCCCC);
-                nameView.setTextSize(14);
+                nameView.setTextSize(16);
                 nameView.setSingleLine(true);
                 nameView.setEllipsize(android.text.TextUtils.TruncateAt.END);
                 nameView.setLayoutParams(new LinearLayout.LayoutParams(
@@ -1097,7 +1097,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
 
                 epgView = new TextView(context);
                 epgView.setTextColor(0xFF888888);
-                epgView.setTextSize(12);
+                epgView.setTextSize(13);
                 epgView.setMaxLines(1);
                 epgView.setEllipsize(android.text.TextUtils.TruncateAt.END);
                 epgView.setLayoutParams(new LinearLayout.LayoutParams(
@@ -1110,7 +1110,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                 favoriteView = new TextView(context);
                 favoriteView.setText("★");
                 favoriteView.setTextColor(0xFFFFC04D);
-                favoriteView.setTextSize(12);
+                favoriteView.setTextSize(13);
                 favoriteView.setGravity(Gravity.CENTER_VERTICAL);
                 favoriteView.setLayoutParams(new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -1136,7 +1136,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
 
                 if (isSelected && focusOnChannels) {
                     nameView.setTextColor(0xFFFF6B35);
-                    nameView.setTextSize(15);
+                    nameView.setTextSize(17);
                     container.setBackgroundResource(R.drawable.channel_item_selected_bg);
                     container.animate()
                             .scaleX(1.04f)
@@ -1146,7 +1146,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                 } else if (isSelected && !focusOnChannels) {
                     // Selected but focus on another panel - dimmer highlight
                     nameView.setTextColor(0xFFFF9966);
-                    nameView.setTextSize(14);
+                    nameView.setTextSize(16);
                     container.setBackgroundResource(R.drawable.channel_item_selected_dim_bg);
                     container.animate()
                             .scaleX(1.0f)
@@ -1155,7 +1155,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                             .start();
                 } else if (isCurrent) {
                     nameView.setTextColor(0xFFFFFFFF);
-                    nameView.setTextSize(14);
+                    nameView.setTextSize(16);
                     container.setBackgroundColor(0x00000000);
                     container.animate()
                             .scaleX(1.0f)
@@ -1164,7 +1164,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                             .start();
                 } else {
                     nameView.setTextColor(0xFFCCCCCC);
-                    nameView.setTextSize(14);
+                    nameView.setTextSize(16);
                     container.setBackgroundColor(0x00000000);
                     container.animate()
                             .scaleX(1.0f)
@@ -1279,7 +1279,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
 
                 timeView = new TextView(context);
                 timeView.setTextColor(ProgramViewHolder.TIME_NORMAL);
-                timeView.setTextSize(11);
+                timeView.setTextSize(12);
                 timeView.setSingleLine(true);
                 timeView.setLayoutParams(new LinearLayout.LayoutParams(
                         dp2px(85),
@@ -1288,7 +1288,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
 
                 titleView = new TextView(context);
                 titleView.setTextColor(0xFFCCCCCC);
-                titleView.setTextSize(12);
+                titleView.setTextSize(14);
                 titleView.setMaxLines(1);
                 titleView.setLayoutParams(new LinearLayout.LayoutParams(
                         0,
