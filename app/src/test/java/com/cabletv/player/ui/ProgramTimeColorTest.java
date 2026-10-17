@@ -57,7 +57,7 @@ public class ProgramTimeColorTest {
                 program("正在播出", now - 60_000L, now + 60_000L)));
 
         ChannelListComponent.ProgramListAdapter adapter =
-                new ChannelListComponent.ProgramListAdapter(mContext, programs);
+                new ChannelListComponent.ProgramListAdapter(mContext, programs, new RowLabelScroller());
         ViewGroup parent = new LinearLayout(mContext);
         ChannelListComponent.ProgramListAdapter.ProgramViewHolder holder =
                 adapter.onCreateViewHolder(parent, 0);
@@ -83,7 +83,7 @@ public class ProgramTimeColorTest {
                 program("稍后", now + 3_600_000L, now + 7_200_000L)));
 
         ChannelListComponent.ProgramListAdapter adapter =
-                new ChannelListComponent.ProgramListAdapter(mContext, programs);
+                new ChannelListComponent.ProgramListAdapter(mContext, programs, new RowLabelScroller());
         ViewGroup parent = new LinearLayout(mContext);
 
         for (int index = 0; index < programs.size(); index++) {

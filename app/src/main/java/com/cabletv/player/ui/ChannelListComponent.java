@@ -63,6 +63,9 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
      * Guide day currently shown, relative to today: 0 = today, -1 = yesterday, ... -6.
      * Navigated with LEFT/RIGHT while the programme column has focus.
      */
+    /** One scroller for the whole list: only the highlighted row's label moves. */
+    private final RowLabelScroller mLabelScroller = new RowLabelScroller();
+
     private int mDayOffset = 0;
     /**
      * The moment the guide should land on: the current time for live television, or the start of
@@ -103,7 +106,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         initView(context);
         mGroupAdapter = new GroupListAdapter(context, navigator);
         mGroupRecyclerView.setAdapter(mGroupAdapter);
-        mAdapter = new ChannelListAdapter(context, navigator);
+        mAdapter = new ChannelListAdapter(context, navigator, mLabelScroller);
         mRecyclerView.setAdapter(mAdapter);
         // Touch: tapping a row acts like the D-pad cursor + OK on that row.
         mGroupAdapter.setRowClickListener(this::onGroupRowTap);
@@ -432,7 +435,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
             mDayOffset = nearestAvailableDayOffset();
         }
         List<EpgManager.Program> dayPrograms = filterProgramsForDay(programs, mDayOffset);
-        ProgramListAdapter programAdapter = new ProgramListAdapter(getContext(), dayPrograms);
+        ProgramListAdapter programAdapter = new ProgramListAdapter(getContext(), dayPrograms, mLabelScroller);
         programAdapter.setRowClickListener(this::onProgramRowTap);
         mProgramRecyclerView.setAdapter(programAdapter);
         mProgramListContainer.setVisibility(VISIBLE);
@@ -718,6 +721,21 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         return true;
     }
 
+    /**
+     * Scrolls a single-line label while its row is the highlighted one.
+     *
+     * <p>A name that does not fit is normally cut off, and a viewer across the room cannot do
+     * anything about that. The highlighted row — the one the cursor is on — scrolls instead, so the
+     * whole text passes by. Only that row moves, and only when there is something hidden: a list
+     * where every row scrolls at once is unreadable.
+     */
+    static void applyMarquee(RowLabelScroller scroller, android.widget.TextView view, boolean scrolling) {
+        if (scroller == null) {
+            return;
+        }
+        scroller.attach(view, scrolling);
+    }
+
     /** Puts the cursor on the first or the last programme of the day currently shown. */
     public void selectProgramEdge(boolean first) {
         RecyclerView.Adapter<?> adapter = mProgramRecyclerView.getAdapter();
@@ -737,6 +755,15 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
     @Override
     public View getView() {
         return this;
+    }
+
+    @Override
+    protected void onVisibilityChanged(android.view.View changedView, int visibility) {
+        super.onVisibilityChanged(changedView, visibility);
+        if (visibility != VISIBLE) {
+            // Nothing is being read while the list is away; a running ticker would just redraw.
+            mLabelScroller.stop();
+        }
     }
 
     @Override
@@ -957,7 +984,11 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         private EpgManager mEpgManager;
         private RowClickCallback mRowClickCallback;
 
-        public ChannelListAdapter(Context context, ChannelNavigator navigator) {
+        private final RowLabelScroller mScroller;
+
+        public ChannelListAdapter(Context context, ChannelNavigator navigator,
+                                  RowLabelScroller scroller) {
+            mScroller = scroller;
             mContext = context;
             mNavigator = navigator;
         }
@@ -1017,7 +1048,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                     RecyclerView.LayoutParams.MATCH_PARENT,
                     dp2px(CHANNEL_ROW_HEIGHT_DP)));
             view.setPadding(dp2px(8), dp2px(8), dp2px(8), dp2px(8));
-            return new ChannelViewHolder(view, mContext);
+            return new ChannelViewHolder(view, mContext, mScroller);
         }
 
         @Override
@@ -1049,8 +1080,11 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
             private final TextView favoriteView;
             private final Context context;
 
-            ChannelViewHolder(LinearLayout itemView, Context context) {
+            private final RowLabelScroller mLabelScroller;
+
+            ChannelViewHolder(LinearLayout itemView, Context context, RowLabelScroller scroller) {
                 super(itemView);
+                mLabelScroller = scroller;
                 this.context = context;
                 this.container = itemView;
                 container.setOrientation(LinearLayout.HORIZONTAL);
@@ -1118,6 +1152,19 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                 container.addView(favoriteView);
             }
 
+                /** Whether this holder's subtitle should be scrolling right now. */
+                private boolean mEpgMarqueeWanted;
+
+                /**
+                 * Starts or stops the subtitle marquee, and re-applies it once the row has been
+                 * measured: a marquee started before the view knows its width never runs, which is
+                 * what left a truncated subtitle sitting still.
+                 */
+                private void applyEpgMarquee(boolean wanted) {
+                    mEpgMarqueeWanted = wanted;
+                    applyMarquee(mLabelScroller, epgView, wanted);
+                }
+
             void setChannel(Channel channel, int number, boolean isSelected, boolean isCurrent,
                             EpgManager epgManager, boolean focusOnChannels, boolean isFavorite) {
                 nameView.setText(channel.name);
@@ -1179,6 +1226,9 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                     if (epgInfo != null && !epgInfo.isEmpty()) {
                         epgView.setText(epgInfo);
                         epgView.setVisibility(android.view.View.VISIBLE);
+                        // The programme name under the highlighted channel scrolls when it does not
+                        // fit, which is the row the viewer is reading.
+                        applyEpgMarquee(isSelected && focusOnChannels);
                     } else {
                         epgView.setVisibility(android.view.View.GONE);
                     }
@@ -1205,7 +1255,11 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         private boolean mFocused = false;
         private RowClickCallback mRowClickCallback;
 
-        public ProgramListAdapter(Context context, List<EpgManager.Program> programs) {
+        private final RowLabelScroller mScroller;
+
+        public ProgramListAdapter(Context context, List<EpgManager.Program> programs,
+                                  RowLabelScroller scroller) {
+            mScroller = scroller;
             mContext = context;
             mPrograms = new ArrayList<>(programs);
         }
@@ -1242,7 +1296,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                     RecyclerView.LayoutParams.MATCH_PARENT,
                     dp2px(PROGRAM_ROW_HEIGHT_DP)));
             view.setPadding(dp2px(12), dp2px(6), dp2px(12), dp2px(6));
-            return new ProgramViewHolder(view, mContext);
+            return new ProgramViewHolder(view, mContext, mScroller);
         }
 
         @Override
@@ -1272,8 +1326,11 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
             private final TextView titleView;
             private final Context context;
 
-            ProgramViewHolder(LinearLayout itemView, Context context) {
+            private final RowLabelScroller mLabelScroller;
+
+            ProgramViewHolder(LinearLayout itemView, Context context, RowLabelScroller scroller) {
                 super(itemView);
+                mLabelScroller = scroller;
                 this.context = context;
                 this.container = itemView;
 
@@ -1282,7 +1339,9 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                 timeView.setTextSize(12);
                 timeView.setSingleLine(true);
                 timeView.setLayoutParams(new LinearLayout.LayoutParams(
-                        dp2px(85),
+                        // Wide enough for the longest stamp at this size ("23:23-23:36"); the column
+                        // is fixed so the titles of every row line up.
+                        dp2px(80),
                         LinearLayout.LayoutParams.WRAP_CONTENT));
                 container.addView(timeView);
 
@@ -1294,8 +1353,19 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                         0,
                         LinearLayout.LayoutParams.WRAP_CONTENT,
                         1.0f));
-                titleView.setPadding(dp2px(8), 0, 0, 0);
+                // Tighter than the leading gap used elsewhere: the time and the title belong
+                // together, and the column above already leaves a little slack of its own.
+                titleView.setPadding(dp2px(4), 0, 0, 0);
                 container.addView(titleView);
+            }
+
+            /** Whether this holder's title should be scrolling right now. */
+            private boolean mTitleMarqueeWanted;
+
+            /** See {@code ChannelViewHolder.applyEpgMarquee}; the guide rows need the same. */
+            private void applyTitleMarquee(boolean wanted) {
+                mTitleMarqueeWanted = wanted;
+                applyMarquee(mLabelScroller, titleView, wanted);
             }
 
             void setProgram(EpgManager.Program program, boolean isSelected, boolean focused) {
@@ -1310,6 +1380,10 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                 } else {
                     timeView.setText("");
                 }
+
+                // A title that does not fit scrolls while this row is the highlighted one; every
+                // other row keeps the ellipsis.
+                applyTitleMarquee(isSelected && focused);
 
                 // Highlight current/next program based on wall-clock time
                 long currentTime = System.currentTimeMillis();
