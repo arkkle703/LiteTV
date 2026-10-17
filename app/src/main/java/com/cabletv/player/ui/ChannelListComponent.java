@@ -189,7 +189,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         // Program list section (right side, initially hidden)
         mProgramListContainer = new LinearLayout(context);
         mProgramListContainer.setOrientation(LinearLayout.VERTICAL);
-        mProgramListContainer.setLayoutParams(new LinearLayout.LayoutParams(dp2px(300), LayoutParams.MATCH_PARENT));
+        mProgramListContainer.setLayoutParams(new LinearLayout.LayoutParams(dp2px(372), LayoutParams.MATCH_PARENT));
         mProgramListContainer.setVisibility(GONE);
 
         TextView programTitle = new TextView(context);
