@@ -151,4 +151,7 @@
     <string name="update_error_install_restricted">The system blocked this install (security setting); open the installer instead, or use ADB / a USB drive</string>
     <string name="update_error_install_failed">The installer refused the update; see the log for its message</string>
     <string name="update_installing_button">Installing…</string>
+    <string name="merge_same_name_channels">Merge channels that share a name</string>
+    <string name="merge_same_name_hint">When a playlist lists one channel once per source (subscription links often do), keep it as a single channel whose sources are tried in order. Playlists without repeated names are unaffected.</string>
+    <string name="merge_same_name_saved">Channel merging saved (the playlist reloads now)</string>
 </resources>

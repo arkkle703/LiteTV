@@ -63,6 +63,7 @@ public class SettingsActivity extends Activity implements UpdateManager.Listener
     private TextView mM3uDropDirText;
     private TextView mAppVersionText;
     private CheckBox mUpdateAutoCheckToggle;
+    private CheckBox mMergeSameNameToggle;
     private TextView mUpdateStatusText;
     private TextView mUpdateChangelogText;
     private TextView mUpdateLastCheckText;
@@ -96,6 +97,7 @@ public class SettingsActivity extends Activity implements UpdateManager.Listener
         mM3uDropDirText = findViewById(R.id.m3u_drop_dir_text);
         mAppVersionText = findViewById(R.id.app_version_text);
         mUpdateAutoCheckToggle = findViewById(R.id.update_auto_check_toggle);
+        mMergeSameNameToggle = findViewById(R.id.merge_same_name_toggle);
         mUpdateStatusText = findViewById(R.id.update_status_text);
         mUpdateChangelogText = findViewById(R.id.update_changelog_text);
         mUpdateLastCheckText = findViewById(R.id.update_last_check_text);
@@ -128,6 +130,12 @@ public class SettingsActivity extends Activity implements UpdateManager.Listener
         clearM3uFileBtn.setOnClickListener(v -> clearM3uFile());
         mWebServerToggle.setOnCheckedChangeListener((btn, isChecked) -> handleWebServerToggle(isChecked));
         mUpdateActionButton.setOnClickListener(v -> handleUpdateAction());
+        mMergeSameNameToggle.setOnCheckedChangeListener((btn, isChecked) -> {
+            // Stored only; the player reloads the playlist when it notices the change on resume,
+            // the same way an edited M3U URL does (see MainActivity's config signature check).
+            AppConfig.setMergeSameNameChannelsEnabled(isChecked);
+            Toast.makeText(this, R.string.merge_same_name_saved, Toast.LENGTH_SHORT).show();
+        });
         mUpdateAutoCheckToggle.setOnCheckedChangeListener((btn, isChecked) -> {
             AppConfig.setUpdateAutoCheckEnabled(isChecked);
             Toast.makeText(this, isChecked ? R.string.update_auto_check_on : R.string.update_auto_check_off,
@@ -269,6 +277,7 @@ public class SettingsActivity extends Activity implements UpdateManager.Listener
         mAppVersionText.setText(getString(R.string.app_version_format,
                 AppVersion.name(this), AppVersion.code(this)));
         mUpdateAutoCheckToggle.setChecked(AppConfig.isUpdateAutoCheckEnabled());
+        mMergeSameNameToggle.setChecked(AppConfig.isMergeSameNameChannelsEnabled());
         renderUpdateStatus();
         updateM3uEpgInfo();
         updateM3uFileInfo();

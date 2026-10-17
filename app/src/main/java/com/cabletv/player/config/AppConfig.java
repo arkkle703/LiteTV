@@ -31,6 +31,7 @@ public class AppConfig {
     private static final String UPDATE_LAST_ERROR_KEY = "app_update_last_error";
     private static final String UPDATE_PENDING_VERSION_KEY = "app_update_pending_version";
     private static final String UPDATE_PENDING_NAME_KEY = "app_update_pending_name";
+    private static final String MERGE_SAME_NAME_CHANNELS_KEY = "app_merge_same_name_channels";
 
     private static final String DEFAULT_EPG_URL = "";
     /**
@@ -296,5 +297,20 @@ public class AppConfig {
 
     public static void setUpdatePendingName(String versionName) {
         Hawk.put(UPDATE_PENDING_NAME_KEY, versionName == null ? "" : versionName);
+    }
+
+    // Channel list
+    /**
+     * Whether a playlist that repeats a channel name inside one group becomes a single channel
+     * whose sources are tried in order. Subscription links routinely list the same channel once per
+     * source, and a viewer treats those as one channel. A playlist without repeated names is
+     * unaffected either way.
+     */
+    public static boolean isMergeSameNameChannelsEnabled() {
+        return Hawk.get(MERGE_SAME_NAME_CHANNELS_KEY, true);  // Default: on
+    }
+
+    public static void setMergeSameNameChannelsEnabled(boolean enabled) {
+        Hawk.put(MERGE_SAME_NAME_CHANNELS_KEY, enabled);
     }
 }

@@ -268,6 +268,9 @@ public class ConfigWebServer {
             } else if ("POST".equals(method) && "/config/display".equals(path)) {
                 response = handleDisplayPost(body);
                 contentType = "application/json";
+            } else if ("POST".equals(method) && "/config/channels".equals(path)) {
+                response = handleChannelsPost(body);
+                contentType = "application/json";
             } else if ("POST".equals(method) && "/config/update-settings".equals(path)) {
                 response = handleUpdateSettingsPost(body);
                 contentType = "application/json";
@@ -485,6 +488,9 @@ public class ConfigWebServer {
         JsonObject config = new JsonObject();
         config.addProperty("m3u_url", AppConfig.getM3uUrl());
         config.addProperty("m3u_file_path", AppConfig.getM3uFilePath());
+        // Whether repeated channel names in one group are merged into one channel (subscription
+        // links list a channel once per source); see M3uParser.
+        config.addProperty("merge_same_name_channels", AppConfig.isMergeSameNameChannelsEnabled());
         // Where to drop a playlist when the TV has no document picker (issue #7).
         Context appContext = sAppContext;
         config.addProperty("m3u_drop_dir", appContext == null ? ""
@@ -526,6 +532,27 @@ public class ConfigWebServer {
         }
         if (!status.changelog.isEmpty()) {
             target.add("update_changelog", new com.google.gson.Gson().toJsonTree(status.changelog));
+        }
+    }
+
+    /**
+     * Saves the channel-list preferences. Takes effect when the playlist is next loaded, which the
+     * television does when it notices the change (or on the next start).
+     */
+    private static String handleChannelsPost(String body) {
+        try {
+            Map<String, String> params = parseFormData(body);
+            String merge = params.get("merge_same_name_channels");
+            if (!isValidFlag(merge)) {
+                return jsonResult(false, "Invalid channel setting");
+            }
+            if (merge != null) {
+                AppConfig.setMergeSameNameChannelsEnabled("1".equals(merge));
+            }
+            return jsonResult(true, "Channel settings saved (the playlist reloads now)");
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving channel settings", e);
+            return jsonResult(false, "Failed to save channel settings");
         }
     }
 
@@ -892,6 +919,12 @@ public class ConfigWebServer {
                 "            <div id=\"uploadStatus\" class=\"status\"></div>\n" +
                 "            <button id=\"clearM3uFileBtn\" onclick=\"clearM3uFile()\" style=\"display:none;\">清除本地文件</button>\n" +
                 "            <div id=\"m3uFileStatus\" class=\"status\"></div>\n" +
+                "            <label style=\"display:flex;align-items:center;gap:8px;margin:12px 0;\">\n" +
+                "                <input type=\"checkbox\" id=\"mergeSameName\"> 合并同名频道（同一频道多个源合成一个）\n" +
+                "            </label>\n" +
+                "            <button onclick=\"saveChannels()\">保存频道设置</button>\n" +
+                "            <div id=\"channelsStatus\" class=\"status\"></div>\n" +
+                "            <div class=\"info\">订阅链接常把同一频道按不同源重复列出；开启后合并为一个频道并依次尝试各个源（播放界面按 R 或双击可手动切换源）。列表本身没有重复时无任何影响。</div>\n" +
                 "        </div>\n" +
                 "        \n" +
                 "        <div class=\"section\">\n" +
@@ -1065,6 +1098,18 @@ public class ConfigWebServer {
                 "                    status.textContent = '✗ 上传失败: ' + e;\n" +
                 "                });\n" +
                 "        }\n" +
+                "        function saveChannels() {\n" +
+                "            const body = 'merge_same_name_channels=' + (document.getElementById('mergeSameName').checked ? '1' : '0');\n" +
+                "            fetch('/config/channels', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body})\n" +
+                "                .then(r => r.json()).then(d => {\n" +
+                "                    const status = document.getElementById('channelsStatus');\n" +
+                "                    status.className = 'status ' + (d.success ? 'success' : 'error');\n" +
+                "                    status.textContent = (d.success ? '✓ ' : '✗ ') + d.message;\n" +
+                "                }).catch(e => {\n" +
+                "                    status.className = 'status error';\n" +
+                "                    status.textContent = '✗ 网络错误: ' + e;\n" +
+                "                });\n" +
+                "        }\n" +
                 "        function savePlayback() {\n" +
                 "            const body = 'video_render_mode=' + encodeURIComponent(document.getElementById('videoRenderMode').value)\n" +
                 "                + '&video_decode_mode=' + encodeURIComponent(document.getElementById('videoDecodeMode').value)\n" +
@@ -1190,6 +1235,7 @@ public class ConfigWebServer {
                 "                document.getElementById('epgActiveInfo').textContent = active\n" +
                 "                    ? '当前生效 EPG: ' + active\n" +
                 "                    : '当前无生效 EPG 来源';\n" +
+                "                document.getElementById('mergeSameName').checked = d.merge_same_name_channels !== false;\n" +
                 "                document.getElementById('updateAutoCheck').checked = d.update_auto_check !== false;\n" +
                 "                renderUpdate(d);\n" +
                 "            }).catch(e => console.error('加载配置失败:', e));\n" +

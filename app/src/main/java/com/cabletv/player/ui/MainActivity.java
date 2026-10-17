@@ -892,7 +892,10 @@ public class MainActivity extends Activity {
 
     /** Identity of the M3U source (URL + local file path). */
     private static String m3uConfigSignature() {
-        return AppConfig.getM3uUrl() + "\n" + AppConfig.getM3uFilePath();
+        // The channel list is built from the playlist, so the merge setting belongs here too:
+        // changing it in the settings screen reloads the list when the viewer comes back.
+        return AppConfig.getM3uUrl() + "\n" + AppConfig.getM3uFilePath()
+                + "\n" + AppConfig.isMergeSameNameChannelsEnabled();
     }
 
     private void handleChannelUp() {

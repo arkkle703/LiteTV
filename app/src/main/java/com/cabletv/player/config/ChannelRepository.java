@@ -168,7 +168,8 @@ public class ChannelRepository {
             return null;
         }
         try {
-            List<ChannelGroup> groups = M3uParser.parse(content);
+            List<ChannelGroup> groups = M3uParser.parse(content,
+                    AppConfig.isMergeSameNameChannelsEnabled());
             if (groups == null || groups.isEmpty()) {
                 return null;
             }

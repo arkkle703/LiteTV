@@ -50,19 +50,90 @@ public class M3uParser {
     public static final String HEADER_REFERER = "Referer";
 
     public static List<ChannelGroup> parse(String content) {
+        return parse(content, true);
+    }
+
+    /**
+     * @param mergeSameNameChannels whether entries that repeat a channel name inside one group are
+     *        folded into a single channel whose sources are tried in order. Off means the playlist
+     *        is taken literally, one channel per entry — which is what a playlist carrying no
+     *        repeated names looks like either way.
+     */
+    public static List<ChannelGroup> parse(String content, boolean mergeSameNameChannels) {
         Map<String, ChannelGroup> groupMap = new LinkedHashMap<>();
 
         if (content == null || content.trim().isEmpty()) {
             return new ArrayList<>();
         }
 
+        // Index of what has already been collected, keyed by group + name; null disables merging.
+        Map<String, Channel> mergeIndex = mergeSameNameChannels ? new LinkedHashMap<String, Channel>() : null;
+
         if (content.startsWith("#EXTM3U")) {
-            parseM3u(content, groupMap);
+            parseM3u(content, groupMap, mergeIndex);
         } else {
-            parseTxt(content, groupMap);
+            parseTxt(content, groupMap, mergeIndex);
         }
 
         return new ArrayList<>(groupMap.values());
+    }
+
+    /**
+     * Adds a channel to its group, folding it into an earlier entry for the same channel when
+     * merging is on.
+     *
+     * <p>Playlists from subscription links routinely repeat a channel once per source (five entries
+     * named 央视一套, five URLs). Those are the same channel to a viewer, so they become one channel
+     * with five sources — the player already fails over between sources and lets the viewer switch
+     * them by hand, so nothing else has to change.
+     *
+     * <p>Only entries with the same group <em>and</em> the same name are merged: the name is what
+     * the guide is matched on, so merging cannot disturb the programme list, and an entry with a
+     * different name (央视一套高清) stays a channel of its own with its own sources.
+     */
+    private static void addOrMergeChannel(Map<String, ChannelGroup> groupMap,
+                                          Map<String, Channel> mergeIndex,
+                                          String groupName, Channel channel) {
+        if (mergeIndex == null) {
+            groupFor(groupMap, groupName).addChannel(channel);
+            return;
+        }
+        String key = mergeKey(groupName, channel.name);
+        Channel existing = mergeIndex.get(key);
+        if (existing == null) {
+            mergeIndex.put(key, channel);
+            groupFor(groupMap, groupName).addChannel(channel);
+            return;
+        }
+        mergeSources(existing, channel);
+    }
+
+    private static String mergeKey(String groupName, String channelName) {
+        return (groupName == null ? "" : groupName) + "\n" + (channelName == null ? "" : channelName.trim());
+    }
+
+    /**
+     * Folds a repeated entry into the channel already listed: its sources are appended (duplicates
+     * are dropped by {@link Channel#addUrl}) and anything the first entry left blank — logo, id,
+     * request headers, catchup — is filled in from this one, so a channel does not lose catchup
+     * just because its first source did not carry the attribute.
+     */
+    private static void mergeSources(Channel target, Channel duplicate) {
+        for (String url : duplicate.urls) {
+            target.addUrl(url);
+        }
+        if (isBlank(target.logo)) target.logo = duplicate.logo;
+        if (isBlank(target.tvgId)) target.tvgId = duplicate.tvgId;
+        if (isBlank(target.catchupType)) target.catchupType = duplicate.catchupType;
+        if (isBlank(target.catchupSource)) target.catchupSource = duplicate.catchupSource;
+        if (isBlank(target.catchupReplace)) target.catchupReplace = duplicate.catchupReplace;
+        if (target.headers == null || target.headers.isEmpty()) {
+            target.headers = duplicate.headers;
+        }
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isEmpty();
     }
 
     /**
@@ -121,7 +192,8 @@ public class M3uParser {
         }
     }
 
-    private static void parseM3u(String content, Map<String, ChannelGroup> groupMap) {
+    private static void parseM3u(String content, Map<String, ChannelGroup> groupMap,
+                                 Map<String, Channel> mergeIndex) {
         BufferedReader reader = new BufferedReader(new StringReader(normalizeNewlines(content)));
         String line;
         String currentGroupName = DEFAULT_GROUP_NAME;
@@ -144,6 +216,9 @@ public class M3uParser {
                 }
 
                 if (line.startsWith("#EXTINF")) {
+                    // Whatever the previous entry collected is finished now: a playlist may put
+                    // several URL lines under one #EXTINF, and every one of them is a source.
+                    commitPendingChannel(groupMap, mergeIndex, pendingChannel);
                     pendingChannel = new Channel();
                     pendingChannel.name = extractPattern(line, NAME_PATTERN);
                     pendingChannel.group = extractPattern(line, GROUP_PATTERN);
@@ -180,19 +255,29 @@ public class M3uParser {
                 if (pendingChannel != null) {
                     String url = takeInlineHeaders(pendingChannel, line);
                     if (isValidUrl(url)) {
+                        // Kept collecting until the next #EXTINF: additional URL lines below the
+                        // same entry belong to the same channel as fallbacks.
                         pendingChannel.addUrl(url);
-                        groupFor(groupMap, pendingChannel.group).addChannel(pendingChannel);
-                        pendingChannel = null;
                     }
                 }
             }
+            commitPendingChannel(groupMap, mergeIndex, pendingChannel);
         } catch (Exception e) {
             // A truncated or malformed playlist still yields every channel read so far.
             Log.w(TAG, "Stopped parsing M3U early: " + e);
         }
     }
 
-    private static void parseTxt(String content, Map<String, ChannelGroup> groupMap) {
+    /** Files the entry that just ended, if it collected at least one usable source. */
+    private static void commitPendingChannel(Map<String, ChannelGroup> groupMap,
+                                             Map<String, Channel> mergeIndex, Channel pendingChannel) {
+        if (pendingChannel != null && pendingChannel.urlCount() > 0) {
+            addOrMergeChannel(groupMap, mergeIndex, pendingChannel.group, pendingChannel);
+        }
+    }
+
+    private static void parseTxt(String content, Map<String, ChannelGroup> groupMap,
+                                 Map<String, Channel> mergeIndex) {
         BufferedReader reader = new BufferedReader(new StringReader(normalizeNewlines(content)));
         String line;
         String currentGroupName = DEFAULT_GROUP_NAME;
@@ -231,7 +316,7 @@ public class M3uParser {
                     }
                 }
                 if (channel.urlCount() > 0) {
-                    groupFor(groupMap, currentGroupName).addChannel(channel);
+                    addOrMergeChannel(groupMap, mergeIndex, currentGroupName, channel);
                 }
             }
         } catch (Exception e) {
