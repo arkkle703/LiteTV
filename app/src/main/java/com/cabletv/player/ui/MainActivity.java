@@ -41,6 +41,11 @@ public class MainActivity extends Activity {
     private ChannelNumberView mChannelNumberView;
     private TimeShiftBarComponent mTimeShiftBar;
     private GestureDetector mGestureDetector;
+
+    // Tap and double-tap bookkeeping for the touch handler above.
+    private long mLastVideoTapUpMs = 0;
+    private final Runnable mSingleTapRunnable = this::handleVideoTap;
+    private final android.os.Handler mTapHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable mTimeShiftTicker = this::tickTimeShiftBar;
     /** How far back the live time-shift bar may rewind when no EPG is known. */
     private static final long TIMESHIFT_NO_EPG_WINDOW_MS = 2 * 60 * 60 * 1000L;
@@ -169,16 +174,16 @@ public class MainActivity extends Activity {
         mGestureDetector = new GestureDetector(this,
                 new GestureDetector.SimpleOnGestureListener() {
                     @Override
-                    public boolean onSingleTapConfirmed(MotionEvent e) {
-                        handleVideoTap();
+                    public boolean onDown(MotionEvent e) {
+                        // Returning true keeps the detector tracking the gesture for
+                        // long-press and fling.
                         return true;
                     }
 
-                    @Override
-                    public boolean onDoubleTap(MotionEvent e) {
-                        handleSourceSwitch();
-                        return true;
-                    }
+                    // Tap and double-tap are decided in the touch listener above, which sees the
+                    // same events but is not subject to the detector's double-tap timer, which
+                    // proved unreliable with some event sources (taps arrived as DOWN + UP and the
+                    // detector never confirmed either).
 
                     @Override
                     public void onLongPress(MotionEvent e) {
@@ -194,7 +199,18 @@ public class MainActivity extends Activity {
                     }
                 });
         mGestureDetector.setIsLongpressEnabled(true);
-        rootView.setOnTouchListener((v, event) -> mGestureDetector.onTouchEvent(event));
+        // Tap and double-tap are decided here rather than by GestureDetector: with the events a
+        // device actually delivers (some arrive as SOURCE_TOUCH_NAVIGATION, e.g. injected taps on
+        // TV remotes with touchpads), the detector's double-tap timer proved unreliable -- onDown
+        // and the UP were seen, but onSingleTapConfirmed/onDoubleTap never fired. The events still
+        // go through the detector below for long-press and fling.
+        rootView.setOnTouchListener((v, event) -> {
+            boolean handled = mGestureDetector.onTouchEvent(event);
+            if (event.getActionMasked() == MotionEvent.ACTION_UP) {
+                onVideoTapUp();
+            }
+            return handled;
+        });
 
         // Digits typed on the remote, shown while the user is still typing
         mChannelNumberView = new ChannelNumberView(this);
@@ -317,6 +333,12 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        // Diagnostics for the reported "touch does nothing on phones": log the first DOWN only,
+        // so a stream of MOVEs does not flood the log.
+        return super.dispatchTouchEvent(event);
+    }
+
     public boolean dispatchKeyEvent(KeyEvent event) {
         KeyMapping.Action action = KeyMapping.resolve(event.getKeyCode());
         if (action == null) {
@@ -1176,6 +1198,24 @@ public class MainActivity extends Activity {
         if (mChannelListComponent != null) {
             mChannelListComponent.setVisibility(android.view.View.GONE);
         }
+    }
+
+    /**
+     * A tap on the video just ended (ACTION_UP). A second tap within the double-tap window is a
+     * source switch; otherwise the pending single-tap fires on a short delay, so the first of a
+     * pair is not mistaken for a single.
+     */
+    private void onVideoTapUp() {
+        long now = android.os.SystemClock.uptimeMillis();
+        mTapHandler.removeCallbacks(mSingleTapRunnable);
+        if (now - mLastVideoTapUpMs <= android.view.ViewConfiguration.getDoubleTapTimeout()) {
+            mLastVideoTapUpMs = 0;
+            handleSourceSwitch();
+            return;
+        }
+        mLastVideoTapUpMs = now;
+        mTapHandler.postDelayed(mSingleTapRunnable,
+                android.view.ViewConfiguration.getDoubleTapTimeout() + 10);
     }
 
     private void handleMenu() {
