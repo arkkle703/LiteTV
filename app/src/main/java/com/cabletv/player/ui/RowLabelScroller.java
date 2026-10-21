@@ -43,10 +43,21 @@ class RowLabelScroller {
     private final Runnable mTick = this::tick;
     private final TextMeasurer mMeasurer;
 
+    /** Where the loop currently is, so each end is held for its own pause. */
+    private enum Phase {
+        /** Moving towards the far end. */
+        SCROLLING,
+        /** Reached the far end: holding so the hidden tail can be read. */
+        AT_END,
+        /** Back at the start: holding before the next pass. */
+        AT_START
+    }
+
     private TextView mView;
     private int mRange;
     private int mOffset;
     private int mLayoutRetries;
+    private Phase mPhase = Phase.SCROLLING;
 
     RowLabelScroller() {
         this(view -> view.getPaint().measureText(String.valueOf(view.getText())));
@@ -68,12 +79,13 @@ class RowLabelScroller {
             release(view);
             return;
         }
-        if (mView != view) {
+        boolean sameView = mView == view;
+        if (!sameView) {
             releaseCurrent();
             mView = view;
             mOffset = 0;
-            mLayoutRetries = 0;
         }
+        mLayoutRetries = 0;
         int available = availableWidth(view);
         if (available <= 0) {
             retryAfterLayout(view);
@@ -87,7 +99,22 @@ class RowLabelScroller {
             view.scrollTo(0, 0);
             return;
         }
-        mRange = (int) Math.ceil(textWidth - available);
+        int newRange = (int) Math.ceil(textWidth - available);
+        // Repeated rebinds (the guide calls notifyDataSetChanged whenever its data or focus
+        // changes) must not restart the marquee: a fresh attach for the same text on the same view
+        // keeps the offset, so the pauses at the ends are actually honoured instead of being cut
+        // short by the next rebind jumping back to the start.
+        if (sameView && newRange == mRange) {
+            // Same text on the same row: keep the position, and leave an end pause alone rather
+            // than rescheduling over it (a rebind must not shorten the hold).
+            if (mPhase == Phase.SCROLLING) {
+                scheduleNext(STEP_MS);
+            }
+            return;
+        }
+        mOffset = 0;
+        mRange = newRange;
+        mPhase = Phase.SCROLLING;
         view.setSingleLine(true);
         // Cleared so the framework does not cut the text at the view edge while it is shifted.
         view.setEllipsize(null);
@@ -120,6 +147,7 @@ class RowLabelScroller {
 
     private void releaseCurrent() {
         stopTicking();
+        mPhase = Phase.SCROLLING;
         if (mView != null) {
             mView.scrollTo(0, 0);
             mView = null;
@@ -134,6 +162,10 @@ class RowLabelScroller {
 
     private void retryAfterLayout(TextView view) {
         if (mLayoutRetries++ >= MAX_LAYOUT_RETRIES) {
+            // Gave up waiting for a measurement: settle on a plain ellipsis instead of leaving the
+            // label in a half-configured marquee state.
+            view.setEllipsize(TextUtils.TruncateAt.END);
+            view.setSelected(false);
             return;
         }
         view.post(() -> {
@@ -157,23 +189,34 @@ class RowLabelScroller {
         if (view == null) {
             return;
         }
-        int next = mOffset + STEP_PX;
-        if (next > mRange) {
-            if (mOffset < mRange) {
-                // First arrival at the far end: hold there so the hidden tail can be read, then
-                // rewind. The longer the hidden tail was, the longer the start pause afterwards.
-                mOffset = mRange;
-                view.scrollTo(mOffset, 0);
-                scheduleNext(PAUSE_END_MS);
+        switch (mPhase) {
+            case AT_END:
+                // Held long enough to read the tail, now rewind to the start.
+                mPhase = Phase.AT_START;
+                mOffset = 0;
+                view.scrollTo(0, 0);
+                // The longer the hidden tail was, the longer the reader needs at the start before
+                // it all scrolls away again.
+                float hidden = mRange > 0
+                        ? (float) mRange / (mRange + availableWidth(view)) : 0f;
+                scheduleNext(PAUSE_START_BASE_MS + (long) (PAUSE_START_BASE_MS * hidden));
                 return;
-            }
-            // Rewind to the start. The longer the hidden tail was, the longer the reader needs to
-            // finish the text from the beginning before it all scrolls away again.
-            float hiddenRatio = mRange > 0 ? (float) mRange / (mRange + availableWidth(mView)) : 0f;
-            long pause = PAUSE_START_BASE_MS + (long) (PAUSE_START_BASE_MS * hiddenRatio);
-            mOffset = 0;
-            view.scrollTo(0, 0);
-            scheduleNext(pause);
+            case AT_START:
+                mPhase = Phase.SCROLLING;
+                scheduleNext(STEP_MS);
+                return;
+            default:
+                break;
+        }
+        int next = mOffset + STEP_PX;
+        if (next >= mRange) {
+            // Reached the far end (or overshot by the last step): clamp and hold there. This is
+            // reached with mOffset == mRange, so it must not be detected by comparing offsets --
+            // an even range lands exactly on it and an offset test would skip the pause entirely.
+            mPhase = Phase.AT_END;
+            mOffset = mRange;
+            view.scrollTo(mOffset, 0);
+            scheduleNext(PAUSE_END_MS);
             return;
         }
         mOffset = next;

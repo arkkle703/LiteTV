@@ -65,6 +65,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
      */
     /** One scroller for the whole list: only the highlighted row's label moves. */
     private final RowLabelScroller mLabelScroller = new RowLabelScroller();
+    private ProgramListAdapter mProgramAdapterRef;
 
     private int mDayOffset = 0;
     /**
@@ -436,6 +437,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         }
         List<EpgManager.Program> dayPrograms = filterProgramsForDay(programs, mDayOffset);
         ProgramListAdapter programAdapter = new ProgramListAdapter(getContext(), dayPrograms, mLabelScroller);
+        mProgramAdapterRef = programAdapter;
         programAdapter.setRowClickListener(this::onProgramRowTap);
         mProgramRecyclerView.setAdapter(programAdapter);
         mProgramListContainer.setVisibility(VISIBLE);
@@ -656,6 +658,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         mGroupAdapter.setFocused(false);
         mAdapter.setFocusOnChannels(false);
         setProgramsFocused(true);
+        mProgramAdapterRef.rebindAfterLayout(mProgramRecyclerView);
     }
 
     public void moveFocusToChannels() {
@@ -664,6 +667,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         mGroupAdapter.setFocused(false);
         mAdapter.setFocusOnChannels(true);
         setProgramsFocused(false);
+        mAdapter.rebindAfterLayout(mRecyclerView);
     }
 
     /**
@@ -1032,6 +1036,12 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
             }
         }
 
+        /** Re-runs the bind pass on the next frame, so the subtitle marquee starts once the rows
+         *  know how wide they are. */
+        void rebindAfterLayout(android.view.ViewGroup list) {
+            list.post(() -> notifyDataSetChanged());
+        }
+
         public void setFocusOnChannels(boolean focus) {
             if (mFocusOnChannels != focus) {
                 mFocusOnChannels = focus;
@@ -1285,6 +1295,12 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                 mFocused = focused;
                 notifyDataSetChanged();
             }
+        }
+
+        /** Re-runs the bind pass on the next frame, so the subtitle marquee starts once the rows
+         *  know how wide they are. */
+        void rebindAfterLayout(android.view.ViewGroup list) {
+            list.post(() -> notifyDataSetChanged());
         }
 
         @NonNull
