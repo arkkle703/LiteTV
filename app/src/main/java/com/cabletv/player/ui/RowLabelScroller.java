@@ -23,8 +23,14 @@ class RowLabelScroller {
     /** Slow enough to read: 2px per frame is roughly 60px a second. */
     private static final int STEP_PX = 2;
     private static final long STEP_MS = 33;
-    /** A pause at each end before starting over, the way a marquee reads. */
-    private static final long PAUSE_MS = 1200;
+    /**
+     * Pauses at the two ends. The one after a full pass is deliberately much longer: a title that
+     * only overflows a little is back at its start within a second, and restarting immediately made
+     * short guides look like they never stopped twitching.
+     */
+    private static final long PAUSE_END_MS = 1600;
+    /** Pause after rewinding to the start, scaled by how much of the text had been hidden. */
+    private static final long PAUSE_START_BASE_MS = 2200;
     /** Retries while the row has not been measured yet; a list row is laid out within a frame. */
     private static final int MAX_LAYOUT_RETRIES = 3;
 
@@ -153,12 +159,25 @@ class RowLabelScroller {
         }
         int next = mOffset + STEP_PX;
         if (next > mRange) {
-            // Start over, after a pause so the two ends are told apart rather than looking joined.
+            if (mOffset < mRange) {
+                // First arrival at the far end: hold there so the hidden tail can be read, then
+                // rewind. The longer the hidden tail was, the longer the start pause afterwards.
+                mOffset = mRange;
+                view.scrollTo(mOffset, 0);
+                scheduleNext(PAUSE_END_MS);
+                return;
+            }
+            // Rewind to the start. The longer the hidden tail was, the longer the reader needs to
+            // finish the text from the beginning before it all scrolls away again.
+            float hiddenRatio = mRange > 0 ? (float) mRange / (mRange + availableWidth(mView)) : 0f;
+            long pause = PAUSE_START_BASE_MS + (long) (PAUSE_START_BASE_MS * hiddenRatio);
             mOffset = 0;
-        } else {
-            mOffset = next;
+            view.scrollTo(0, 0);
+            scheduleNext(pause);
+            return;
         }
+        mOffset = next;
         view.scrollTo(mOffset, 0);
-        scheduleNext(mOffset == 0 ? PAUSE_MS : STEP_MS);
+        scheduleNext(STEP_MS);
     }
 }
