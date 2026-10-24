@@ -4,7 +4,7 @@ plugins {
 
 android {
     namespace = "com.cabletv.player"
-    compileSdk 34
+    compileSdk 35
 
     defaultConfig {
         applicationId 'com.cabletv.player'

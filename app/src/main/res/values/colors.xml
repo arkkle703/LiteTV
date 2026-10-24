@@ -16,4 +16,12 @@
     <color name="next_program_text">#999999</color>
     <color name="bg_overlay_start">#CC000000</color>
     <color name="bg_overlay_end">#66000000</color>
+
+    <!--
+        分段式选择页与播放控制面板用到的"叠加层"。
+        这两项都是白色透明叠加（把卡片从黑底上轻轻提起来），不引入新的色相，
+        真正的主色仍然只有 colorAccent 一族，和原版保持一致。
+    -->
+    <color name="surface_card">#1AFFFFFF</color>
+    <color name="surface_card_stroke">#1FFFFFFF</color>
 </resources>

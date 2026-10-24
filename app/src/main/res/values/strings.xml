@@ -154,4 +154,20 @@
     <string name="merge_same_name_channels">Merge channels that share a name</string>
     <string name="merge_same_name_hint">When a playlist lists one channel once per source (subscription links often do), keep it as a single channel whose sources are tried in order. Playlists without repeated names are unaffected.</string>
     <string name="merge_same_name_saved">Channel merging saved (the playlist reloads now)</string>
+
+    <!-- Segmented channel picker (mytv-style) -->
+    <string name="picker_title">Channels</string>
+    <string name="picker_hint">OK to watch · hold OK to favourite</string>
+    <string name="picker_group_count">%1$s · %2$d channels</string>
+    <string name="picker_program_subtitle">%1$s · today\'s guide (left/right: programmes and days)</string>
+
+    <!-- Channel-change info card -->
+    <string name="tune_info_replay">Replay</string>
+
+    <!-- Playback control panel -->
+    <string name="control_title">Playback</string>
+    <string name="control_rewind">« 10s</string>
+    <string name="control_forward">10s »</string>
+    <string name="control_live">Back to live</string>
+    <string name="control_replay_from_start">Replay from start</string>
 </resources>

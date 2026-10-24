@@ -154,4 +154,20 @@
     <string name="merge_same_name_channels">合并同名频道</string>
     <string name="merge_same_name_hint">当播放列表把同一频道按不同源重复列出时（订阅链接常见），合并为一个频道并依次尝试各个源。列表本身没有重复时无任何影响。</string>
     <string name="merge_same_name_saved">合并设置已保存（正在重新加载播放列表）</string>
+
+    <!-- 分段式频道选择页（mytv 风格） -->
+    <string name="picker_title">频道</string>
+    <string name="picker_hint">OK 观看 · 长按 OK 收藏</string>
+    <string name="picker_group_count">%1$s · %2$d 个频道</string>
+    <string name="picker_program_subtitle">%1$s · 今日节目单（左右键换节目 / 翻日期）</string>
+
+    <!-- 换台信息卡 -->
+    <string name="tune_info_replay">回看</string>
+
+    <!-- 播放控制面板 -->
+    <string name="control_title">播放控制</string>
+    <string name="control_rewind">« 后退 10 秒</string>
+    <string name="control_forward">前进 10 秒 »</string>
+    <string name="control_live">回到直播</string>
+    <string name="control_replay_from_start">从头回看</string>
 </resources>

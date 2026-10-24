@@ -95,10 +95,13 @@ public class MainActivity extends Activity {
     private final StringBuilder mNumberInput = new StringBuilder();
     private final Runnable mNumberCommitRunnable = this::commitNumberInput;
 
-    /** How long OK must be held to mean "long press" rather than "select". */
+    /** 长按 OK 与短按 OK 含义不同，所以 OK 要看完整的按下—抬起序列。 */
     private static final long OK_LONG_PRESS_MS = 600;
     private final Runnable mOkLongPressRunnable = this::onOkLongPress;
     private boolean mOkLongPressFired = false;
+
+    /** 播放控制面板是否正在显示（显示时左右键交给面板自己的按钮）。 */
+    private boolean mControlPanelVisible = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -131,16 +134,17 @@ public class MainActivity extends Activity {
             }
         }
 
-        // Add bottom playback info bar
+        // Add the channel-change info card, anchored top-left like a TV info page
         mPlaybackInfoComponent = new PlaybackInfoComponent(this);
         mPlaybackInfoComponent.setEpgManager(mEpgManager);
+        mPlaybackInfoComponent.setSafeMargins(dp2px(40), dp2px(28));
         FrameLayout.LayoutParams infoBarlp = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
-                dp2px(100));
-        infoBarlp.gravity = android.view.Gravity.BOTTOM;
+                FrameLayout.LayoutParams.WRAP_CONTENT);
+        infoBarlp.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
         mPlaybackInfoComponent.setLayoutParams(infoBarlp);
         rootView.addView(mPlaybackInfoComponent);
-        // On phones the info bar is the doorway to the channel list: tap it to open the menu.
+        // On phones the info card is the doorway to the channel list: tap it to open the menu.
         mPlaybackInfoComponent.setClickable(true);
         mPlaybackInfoComponent.setOnClickListener(v -> {
             if (!mChannelListVisible) {
@@ -167,7 +171,6 @@ public class MainActivity extends Activity {
             }
         });
         rootView.addView(mTimeShiftBar, mTimeShiftBar.createBottomLayoutParams());
-
         // Phone/touch: tap video to show controls, double-tap to cycle sources, long-press
         // to replay the current programme, vertical fling to change channel, horizontal
         // fling for LEFT/RIGHT semantics (day paging / catchup seeking).
@@ -443,21 +446,22 @@ public class MainActivity extends Activity {
         });
     }
 
-    /** Tap on the video: toggle the control overlay (or the channel list if it is open). */
+    /** Tap on the video: toggle the channel list, or bring up the info card + playback panel. */
     private void handleVideoTap() {
         if (mChannelListVisible) {
             hideChannelList();
             mChannelListVisible = false;
             return;
         }
-        if (mTimeShiftBar.getVisibility() == View.VISIBLE) {
-            mTimeShiftBar.hideSmooth();
+        if (mControlPanelVisible) {
+            closePlaybackPanel();
             return;
         }
         Channel channel = mChannelRepository.getChannel(mCurrentChannelIndex);
         if (channel != null && mPlaybackInfoComponent != null) {
             mPlaybackInfoComponent.showChannelInfo(channel);
         }
+        // 触摸用户没有遥控器上的右键：点一下画面就把播放控制面板一起叫出来
         refreshTimeShiftBar(true);
     }
 
@@ -497,7 +501,7 @@ public class MainActivity extends Activity {
         }
         Channel channel = mChannelRepository.getChannel(mCurrentChannelIndex);
         if (channel == null || !channel.hasCatchup()) {
-            mTimeShiftBar.hide();
+            closePlaybackPanel();
             return;
         }
         if (targetMs >= now - TIMESHIFT_LIVE_MARGIN_MS) {
@@ -557,9 +561,12 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * @param forceShow live mode only: the bar normally stays hidden until the user taps the
-     *                  video, so it never sits over TV playback uninvited. Catchup always shows
-     *                  it because the drag IS the way to seek a replay.
+     * Refreshes the playback panel's data.
+     *
+     * <p>面板不再"自己冒出来"：mytv 风格下它由用户按出来（直播中按右键、触摸点一下、
+     * 回看中按右键），关掉之后就安静地待在屏幕外，不挡画面。
+     *
+     * @param forceShow true 时顺手把面板打开（触摸点击、回看开始时）
      */
     private void refreshTimeShiftBar(boolean forceShow) {
         if (mTimeShiftBar == null) {
@@ -567,32 +574,75 @@ public class MainActivity extends Activity {
         }
         Channel channel = mChannelRepository.getChannel(mCurrentChannelIndex);
         if (channel == null) {
-            mTimeShiftBar.hide();
+            closePlaybackPanel();
             return;
         }
         long now = System.currentTimeMillis();
         if (mCatchupActive && mCatchupProgram != null) {
             long end = catchupWindowEnd(mCatchupProgram, now);
             mTimeShiftBar.setChannelLabel(channel.name);
-            mTimeShiftBar.setBackToLiveVisible(true);
+            mTimeShiftBar.setReplayMode(true);
             mTimeShiftBar.setWindow(mCatchupProgram.startTime, end, mCatchupPlayheadMs);
-            mTimeShiftBar.show();
-            startTimeShiftTicker();
+            if (forceShow) {
+                openPlaybackPanel(true);
+            }
             return;
         }
-        if (!channel.hasCatchup()) {
-            mTimeShiftBar.hide();
-            return;
-        }
-        // Live: the window runs from the programme start to now.
+        // 直播：窗口从节目开始跑到"现在"
         long start = timeShiftWindowStart(channel);
         mTimeShiftBar.setChannelLabel(channel.name);
-        mTimeShiftBar.setBackToLiveVisible(false);
+        mTimeShiftBar.setReplayMode(false);
         mTimeShiftBar.setWindow(start, now, now);
         if (forceShow) {
-            mTimeShiftBar.show();
-            startTimeShiftTicker();
+            openPlaybackPanel(true);
         }
+    }
+
+    /** 打开底部播放控制面板（遥控器：直播中按右键）。 */
+    private void openPlaybackPanel() {
+        openPlaybackPanel(false);
+    }
+
+    /**
+     * @param quiet 触摸点出来的面板要安静：不支持回看的频道只是没有可控制的东西，
+     *              每次点屏幕都弹一句提示很烦；按键呼出来时才值得解释一句。
+     */
+    private void openPlaybackPanel(boolean quiet) {
+        if (mTimeShiftBar == null) {
+            return;
+        }
+        Channel channel = mChannelRepository.getChannel(mCurrentChannelIndex);
+        if (channel == null) {
+            return;
+        }
+        if (!mCatchupActive && !channel.hasCatchup()) {
+            if (!quiet) {
+                android.widget.Toast.makeText(this, R.string.catchup_not_available,
+                        android.widget.Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
+        if (mChannelListVisible) {
+            hideChannelList();
+            mChannelListVisible = false;
+        }
+        refreshTimeShiftBar(false);
+        // 换台信息卡在左上角，面板在底部，两者同时出现会显得乱：先收掉信息卡
+        if (mPlaybackInfoComponent != null) {
+            mPlaybackInfoComponent.hideNow();
+        }
+        mControlPanelVisible = true;
+        mTimeShiftBar.show();
+        startTimeShiftTicker();
+    }
+
+    /** 收起播放控制面板。 */
+    private void closePlaybackPanel() {
+        mControlPanelVisible = false;
+        if (mTimeShiftBar != null) {
+            mTimeShiftBar.hide();
+        }
+        stopTimeShiftTicker();
     }
 
     private void stopTimeShiftTicker() {
@@ -638,6 +688,11 @@ public class MainActivity extends Activity {
         }
         mOkLongPressFired = true;
         mMainHandler.removeCallbacks(mOkLongPressRunnable);
+
+        if (mControlPanelVisible) {
+            // 面板开着时 OK 属于面板（短按执行按钮），长按不再叠一个回看动作
+            return;
+        }
 
         if (mChannelListVisible && mChannelListComponent != null) {
             if (mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.PROGRAMS) {
@@ -762,9 +817,13 @@ public class MainActivity extends Activity {
             }
         });
         if (mPlaybackInfoComponent != null) {
+            mPlaybackInfoComponent.setChannelNumber(mCurrentChannelIndex + 1);
+            mPlaybackInfoComponent.setReplayMode(true);
             mPlaybackInfoComponent.showChannelInfo(channel);
         }
         refreshTimeShiftBar();
+        // 回看开始就把控制面板摆出来：用户接下来要做的就是快进/快退/回直播
+        openPlaybackPanel();
         android.widget.Toast.makeText(this,
                 getString(R.string.catchup_started, program.title),
                 android.widget.Toast.LENGTH_SHORT).show();
@@ -921,59 +980,35 @@ public class MainActivity extends Activity {
     }
 
     private void handleChannelUp() {
-        long now = System.currentTimeMillis();
-        if (now - mLastChannelSwitchTime < CHANNEL_SWITCH_DEBOUNCE_MS) {
-            return;
-        }
-        mLastChannelSwitchTime = now;
-
-        Log.d(TAG, "handleChannelUp: mChannelListVisible=" + mChannelListVisible);
-
-        if (mChannelListVisible && mChannelListComponent != null) {
-            moveSelectionInList(false);
-        } else {
-            // No channel list visible: change channel (UP = next channel)
-            tuneWithinCurrentGroup(1);
-        }
+        handleVerticalKey(false);
     }
 
     private void handleChannelDown() {
+        handleVerticalKey(true);
+    }
+
+    /**
+     * 上下键。
+     *
+     * <p>列表/控制面板打开时它们是"移动光标"，只有全屏看直播时才是换台。两种用途的节流
+     * 必须分开：换台要防抖（0.25 秒），列表里光标要跟手（按住方向键应当连着走）。
+     */
+    private void handleVerticalKey(boolean down) {
+        if (mChannelListVisible && mChannelListComponent != null) {
+            mChannelListComponent.handleVertical(down);
+            return;
+        }
+        if (mControlPanelVisible) {
+            // 面板开着时上下键的意图是换台，先把面板收掉
+            closePlaybackPanel();
+        }
         long now = System.currentTimeMillis();
         if (now - mLastChannelSwitchTime < CHANNEL_SWITCH_DEBOUNCE_MS) {
             return;
         }
         mLastChannelSwitchTime = now;
-
-        if (mChannelListVisible && mChannelListComponent != null) {
-            moveSelectionInList(true);
-        } else {
-            // No channel list visible: change channel (DOWN = previous channel)
-            tuneWithinCurrentGroup(-1);
-        }
-    }
-
-    /** Up and down move the cursor inside whichever of the three columns has the focus. */
-    private void moveSelectionInList(boolean down) {
-        switch (mChannelListComponent.getFocusPanel()) {
-            case PROGRAMS:
-                if (!mChannelListComponent.moveProgramSelection(down)) {
-                    // The cursor ran off an end of the day: page the guide that way, which is how
-                    // the viewer reaches earlier days now that LEFT belongs to the column layout.
-                    if (mChannelListComponent.moveProgramDay(down ? 1 : -1)) {
-                        Log.d(TAG, "moveSelectionInList: paged the guide to another day");
-                        // Land where the movement was heading: stepping up past the top of a day
-                        // continues at the bottom of the previous one, and the other way round.
-                        mChannelListComponent.selectProgramEdge(down);
-                    }
-                }
-                break;
-            case GROUPS:
-                mChannelListComponent.moveGroupSelection(down);
-                break;
-            default:
-                mChannelListComponent.moveChannelSelection(down);
-                break;
-        }
+        // UP = 下一个频道，DOWN = 上一个频道
+        tuneWithinCurrentGroup(down ? -1 : 1);
     }
 
     /**
@@ -1012,92 +1047,65 @@ public class MainActivity extends Activity {
 
     /** Left steps back through the three columns: programmes, channels, groups. */
     private void handleFocusLeft() {
-        if (!mChannelListVisible || mChannelListComponent == null) {
-            // Full-screen LEFT rewinds the catchup playhead; in live playback it enters 回看 so
-            // the viewer can rewind a programme they missed the start of.
-            if (mCatchupActive) {
-                seekCatchup(-CATCHUP_SEEK_STEP_MS);
-            } else {
-                enterCatchupFromLive();
-            }
+        if (mControlPanelVisible) {
+            mTimeShiftBar.handleHorizontal(false);
             return;
         }
-        // Inside the programme column, LEFT steps back a day. When there is no earlier day (most
-        // feeds carry today alone) it folds back to the channels instead of doing nothing, so the
-        // key is never a dead end; the ends of the list page the days as well (moveSelectionInList).
-        if (mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.PROGRAMS) {
-            if (!mChannelListComponent.moveProgramDay(-1)) {
-                Log.d(TAG, "handleFocusLeft: no earlier day, folding back to channels");
-                mChannelListComponent.moveFocusToChannels();
-            }
+        if (mChannelListVisible && mChannelListComponent != null) {
+            mChannelListComponent.handleHorizontal(false);
             return;
         }
-        Log.d(TAG, "handleFocusLeft: Moving focus to groups");
-        mChannelListComponent.moveFocusToGroups();
+        // 全屏：回看中后退 10 秒；直播中直接从头回看当前节目
+        if (mCatchupActive) {
+            seekCatchup(-CATCHUP_SEEK_STEP_MS);
+        } else {
+            enterCatchupFromLive();
+        }
     }
 
-    /** Right steps forward through the three columns: groups, channels, programmes. */
+    /** Right walks the columns forward; on live TV it opens the playback panel. */
     private void handleFocusRight() {
-        if (!mChannelListVisible || mChannelListComponent == null) {
-            // Full-screen RIGHT fast-forwards the catchup playhead.
-            if (mCatchupActive) {
-                seekCatchup(CATCHUP_SEEK_STEP_MS);
-            }
+        if (mControlPanelVisible) {
+            mTimeShiftBar.handleHorizontal(true);
             return;
         }
-        switch (mChannelListComponent.getFocusPanel()) {
-            case GROUPS:
-                Log.d(TAG, "handleFocusRight: Moving focus to channels");
-                mChannelListComponent.moveFocusToChannels();
-                break;
-            case PROGRAMS:
-                // Inside the programme column, RIGHT pages the guide one day forward.
-                mChannelListComponent.moveProgramDay(1);
-                break;
-            default:
-                Log.d(TAG, "handleFocusRight: Moving focus to programs");
-                mChannelListComponent.moveFocusToPrograms();
-                break;
+        if (mChannelListVisible && mChannelListComponent != null) {
+            mChannelListComponent.handleHorizontal(true);
+            return;
         }
+        if (mCatchupActive) {
+            seekCatchup(CATCHUP_SEEK_STEP_MS);
+            return;
+        }
+        // 直播中右键：呼出播放控制面板（时移进度 + 快退快进 + 从头回看）。
+        // 这是遥控器上唯一不需要长按、也不需要触摸就能进控制的入口。
+        openPlaybackPanel();
     }
 
     private void handleOk() {
-        Log.d(TAG, "handleOk called, mChannelListVisible=" + mChannelListVisible);
-        if (mChannelListVisible) {
-            if (mChannelListComponent != null) {
-                if (mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.GROUPS) {
-                    // OK on a group means "let me pick from this one", not "play something"
-                    mChannelListComponent.moveFocusToChannels();
-                    return;
-                }
-                if (mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.PROGRAMS) {
-                    // OK on a programme replays it (回看); this is the natural "select" action, so
-                    // it must not play the live channel the way a channel-row click does.
-                    Channel channel = mChannelListComponent.getSelectedChannel();
-                    EpgManager.Program program = mChannelListComponent.getSelectedProgram();
-                    if (channel != null && program != null && channel.hasCatchup()) {
-                        // Remember the highlighted channel as current so exiting the replay lands
-                        // on this channel's live stream, not the previously playing one.
-                        mCurrentChannelIndex = mChannelListComponent.getSelectedChannelIndex();
-                        mNavigator.setCurrentGroupIndex(mChannelListComponent.getBrowsedGroupIndex());
-                        playCatchup(channel, program);
-                        return;
-                    }
-                    // No catchup or no programme: fall through so OK still does something useful.
-                }
-                // The group the channel was picked from is the one the channel keys walk from now on
-                mNavigator.setCurrentGroupIndex(mChannelListComponent.getBrowsedGroupIndex());
-                mChannelListComponent.confirmSelection();
-            }
-            hideChannelList();
-            mChannelListVisible = false;
-            Log.d(TAG, "handleOk - hiding list");
-        } else {
-            // Show channel list for selection
-            mChannelListVisible = true;
-            showChannelList();
-            Log.d(TAG, "handleOk - showing list, mChannelListVisible now=" + mChannelListVisible);
+        if (mControlPanelVisible) {
+            mTimeShiftBar.handleOk();
+            return;
         }
+        if (mChannelListVisible) {
+            if (mChannelListComponent == null) {
+                hideChannelList();
+                mChannelListVisible = false;
+                return;
+            }
+            ChannelListComponent.FocusPanel panel = mChannelListComponent.getFocusPanel();
+            // 从哪个分组里选的，之后上下键就在这个分组里走
+            mNavigator.setCurrentGroupIndex(mChannelListComponent.getBrowsedGroupIndex());
+            mChannelListComponent.handleOk();
+            if (panel == ChannelListComponent.FocusPanel.GROUPS) {
+                // 分组栏上按 OK 只是"进入这个分组"，列表保持打开
+                return;
+            }
+            // 频道：选中回调里已关闭列表；节目：startCatchup 里关闭
+            return;
+        }
+        mChannelListVisible = true;
+        showChannelList();
     }
 
     /**
@@ -1152,19 +1160,17 @@ public class MainActivity extends Activity {
                 playCatchup(channel, program);
             });
 
-            // Add to VideoView's parent or create appropriate params
+            // 分段式选择页现在是一整页，铺满屏幕而不是从左侧滑出的侧栏
             if (mVideoView.getParent() instanceof android.view.ViewGroup) {
                 android.view.ViewGroup parent = (android.view.ViewGroup) mVideoView.getParent();
-                // The menu measures itself: its columns come and go, so a fixed width would leave
-                // an empty stripe of background behind whichever column is folded away.
                 if (parent instanceof FrameLayout) {
                     FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                            FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.MATCH_PARENT);
-                    lp.gravity = android.view.Gravity.START;
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                            FrameLayout.LayoutParams.MATCH_PARENT);
                     mChannelListComponent.setLayoutParams(lp);
                 } else {
                     android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(
-                            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                            android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
                             android.widget.LinearLayout.LayoutParams.MATCH_PARENT);
                     mChannelListComponent.setLayoutParams(lp);
                 }
@@ -1223,14 +1229,16 @@ public class MainActivity extends Activity {
     }
 
     private void handleBack() {
-        if (isNumberInputActive()) {
+        if (mControlPanelVisible) {
+            // 播放控制面板是浮层：BACK 先收面板，不打断播放
+            closePlaybackPanel();
+        } else if (isNumberInputActive()) {
             // BACK abandons a half-typed channel number instead of leaving the app.
             cancelNumberInput();
         } else if (mChannelListVisible && mChannelListComponent != null
                 && (mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.GROUPS
                 || mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.PROGRAMS)) {
-            // The groups column was a detour, and so is the programmes (day) column: BACK folds
-            // either away again rather than closing the menu.
+            // 分组栏与节目单都是"绕路"，BACK 折回频道网格而不是关掉整页
             mChannelListComponent.moveFocusToChannels();
         } else if (mChannelListVisible) {
             hideChannelList();
@@ -1284,8 +1292,12 @@ public class MainActivity extends Activity {
                     mChannelListComponent.setCurrentChannel(index);
                 }
                 if (mPlaybackInfoComponent != null) {
+                    mPlaybackInfoComponent.setChannelNumber(index + 1);
+                    mPlaybackInfoComponent.setReplayMode(false);
                     mPlaybackInfoComponent.showChannelInfo(channel);
                 }
+                // 换台就收掉上一频道的控制面板，否则进度条还停在旧数据上
+                closePlaybackPanel();
                 refreshTimeShiftBar();
             });
             // Save current channel for resume on next app startup

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 频道卡片：光标所在（和原版选中项同一套色：item_selected_bg + colorAccent 描边） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/item_selected_bg" />
+    <stroke android:width="2dp" android:color="@color/colorAccent" />
+    <corners android:radius="@dimen/item_corner_radius" />
+</shape>

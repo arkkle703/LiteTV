@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 播放控制按钮：光标所在（主色满怀 + 白字） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/colorAccent" />
+    <stroke android:width="2dp" android:color="@color/item_selected_dim_text" />
+    <corners android:radius="@dimen/item_corner_radius" />
+</shape>
