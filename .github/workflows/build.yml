@@ -29,6 +29,11 @@ jobs:
       - name: Build debug APKs
         # 上游的 gradle.properties 被 .gitignore 忽略（里面放签名口令），
         # 所以 AndroidX 开关在命令行上传，仓库里就不用提交任何敏感文件。
+        #
+        # 堆内存必须给够：splits 会并行打 4 个 ABI 的包，
+        # 默认堆在 packageDebug 阶段会抛 OutOfMemoryError: Java heap space。
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.workers.max=2"
         run: ./gradlew :app:assembleDebug -Pandroid.useAndroidX=true --stacktrace
 
       - name: Upload APKs
